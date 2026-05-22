@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "dist:mac": "tsc && vite build && electron-builder --mac dmg",
     "preview": "vite preview",
     "icons": "bash scripts/generate-icons.sh"
   },
@@ -29,7 +30,10 @@
     ],
     "mac": {
       "icon": "icon.icns",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg"
+      ]
     },
     "win": {
       "icon": "icon.png",

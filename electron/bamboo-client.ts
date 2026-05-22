@@ -654,7 +654,8 @@ export class BambooClient {
     const hasMore = batch.length > pageSize
     const page = batch.slice(0, pageSize)
     const merged = mergeBuildResultsByKey(queued, page)
-    return { rows: merged.map(buildResultToPlanHistoryRow), hasMore }
+    const enriched = await mapInBatches(merged, 4, (b) => this.enrichBuildResultForDeploy(b))
+    return { rows: enriched.map(buildResultToPlanHistoryRow), hasMore }
   }
 
   async getBuildDetail(buildResultKey: string): Promise<any> {
