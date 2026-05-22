@@ -6,7 +6,43 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "icons": "bash scripts/generate-icons.sh"
+  },
+  "build": {
+    "appId": "app.bamboo.monitor",
+    "productName": "Bamboo Monitor",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "resources/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
+    "mac": {
+      "icon": "icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "icon": "icon.png",
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "icon": "icon.png",
+      "target": [
+        "AppImage"
+      ]
+    }
   },
   "dependencies": {
     "electron-store": "^8.1.0",
