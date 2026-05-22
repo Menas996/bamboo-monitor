@@ -78,6 +78,10 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'changes' | 'variables' | 'tests' | 'history' | 'jira'>('summary')
   const [planResults, setPlanResults] = useState<any[]>([])
   const [planResultsLoading, setPlanResultsLoading] = useState(false)
+  const [planHistoryHasMore, setPlanHistoryHasMore] = useState(false)
+  const [planHistoryLoadingMore, setPlanHistoryLoadingMore] = useState(false)
+  const [planHistoryOffset, setPlanHistoryOffset] = useState(0)
+  const HISTORY_PAGE_SIZE = 20
   const [actionsOpen, setActionsOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [customVars, setCustomVars] = useState<{ key: string; value: string }[]>([{ key: '', value: '' }])
@@ -88,6 +92,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [transitioning, setTransitioning] = useState(false)
   const pendingDeleteRef = useRef<string | null>(null)
+  const deletedBuildKeysRef = useRef<Set<string>>(new Set())
   const seamlessNavRef = useRef(false)
   const prevBuildKeyRef = useRef<string | null>(null)
   const prevPickRunningRef = useRef(false)
@@ -153,6 +158,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     const ok = await window.actions.deleteBuildResult(keyToDelete)
     setDeleting(false)
     if (ok) {
+      deletedBuildKeysRef.current.add(keyToDelete)
       showMsg('success', t('build.delete_success'))
       setHistoryRefreshKey((k) => k + 1)
       try {
@@ -194,7 +200,16 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     }
 
     if (fallback?.buildResultKey) {
+      deletedBuildKeysRef.current.add(keyToDelete)
+      const fbNum = fallback.buildNumber ?? buildNumberFromResultKey(fallback.buildResultKey, planKey)
+      setLiveSnapshot({
+        buildResultKey: fallback.buildResultKey,
+        buildNumber: fbNum,
+        buildState: fallback.buildState,
+        lifeCycleState: fallback.lifeCycleState,
+      })
       showMsg('success', t('build.delete_switching'))
+      seamlessNavRef.current = true
       pendingDeleteRef.current = keyToDelete
       navigate({ page: 'build', buildResultKey: fallback.buildResultKey })
       return
@@ -289,9 +304,15 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       try {
         const raw = await window.bamboo.getPlanResults(planKey)
         const pendingDelete = pendingDeleteRef.current
-        const list = normalizePlanResults(raw, planKey).filter(
-          (r) => !pendingDelete || r.buildResultKey !== pendingDelete
-        )
+        const fullList = normalizePlanResults(raw, planKey)
+        for (const k of [...deletedBuildKeysRef.current]) {
+          if (!fullList.some((r) => r.buildResultKey === k)) {
+            deletedBuildKeysRef.current.delete(k)
+          }
+        }
+        const skipKeys = new Set(deletedBuildKeysRef.current)
+        if (pendingDelete) skipKeys.add(pendingDelete)
+        const list = fullList.filter((r) => !skipKeys.has(r.buildResultKey))
         const pick = pickPlanBuildResult(list)
         const pickRunning = !!(pick && isBuildRunning(pick))
         if (!fetchDetail && prevPickRunningRef.current && !pickRunning && pick?.buildResultKey === buildResultKey) {
@@ -301,37 +322,14 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         if (pendingDelete) {
           activeKey = buildResultKey
         } else {
-          activeKey = resolveActiveBuildKey(buildResultKey, planKey, pick)
+          activeKey = resolveActiveBuildKey(buildResultKey, planKey, pick, skipKeys)
           if (!cancelled) setLiveSnapshot(pick?.buildResultKey === activeKey ? pick : null)
-          if (!cancelled && activeKey !== buildResultKey) {
+          if (!cancelled && activeKey !== buildResultKey && !skipKeys.has(activeKey)) {
             seamlessNavRef.current = true
             navigate({ page: 'build', buildResultKey: activeKey })
             return
           }
         }
-        // #region agent log
-        fetch('http://127.0.0.1:7522/ingest/f7723d59-4059-47b6-80a5-39e778755896', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f83b21' },
-          body: JSON.stringify({
-            sessionId: 'f83b21',
-            runId: 'deploy-status',
-            hypothesisId: 'H1-H3',
-            location: 'BuildDetail.tsx:refresh',
-            message: 'plan pick vs detail',
-            data: {
-              activeKey,
-              pickRunning,
-              pickState: pick?.buildState,
-              pickLife: pick?.lifeCycleState,
-              detailRunning: detailRef.current ? isBuildRunning(detailRef.current) : null,
-              detailState: detailRef.current?.buildState,
-              fetchDetail,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {})
-        // #endregion
       } catch {
         /* use route key */
       }
@@ -377,11 +375,23 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
 
     async function loadHistory() {
       setPlanResultsLoading(true)
+      setPlanHistoryOffset(0)
       try {
-        const rows = await window.bamboo.getPlanResultsEnriched(planKey)
-        if (!cancelled) setPlanResults(rows)
+        const { rows, hasMore } = await window.bamboo.getPlanResultsHistoryPage(
+          planKey,
+          0,
+          HISTORY_PAGE_SIZE
+        )
+        if (!cancelled) {
+          setPlanResults(rows)
+          setPlanHistoryHasMore(hasMore)
+          setPlanHistoryOffset(HISTORY_PAGE_SIZE)
+        }
       } catch {
-        if (!cancelled) setPlanResults([])
+        if (!cancelled) {
+          setPlanResults([])
+          setPlanHistoryHasMore(false)
+        }
       } finally {
         if (!cancelled) setPlanResultsLoading(false)
       }
@@ -392,6 +402,35 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       cancelled = true
     }
   }, [activeTab, buildResultKey, detail?.plan?.key, historyRefreshKey])
+
+  async function loadMorePlanHistory() {
+    const planKey = detail?.plan?.key ?? planKeyFromBuildResultKey(buildResultKey)
+    if (!planKey || planHistoryLoadingMore || !planHistoryHasMore) return
+    setPlanHistoryLoadingMore(true)
+    const start = planHistoryOffset
+    try {
+      const { rows, hasMore } = await window.bamboo.getPlanResultsHistoryPage(
+        planKey,
+        start,
+        HISTORY_PAGE_SIZE
+      )
+      setPlanResults((prev) => {
+        const seen = new Set(prev.map((r) => r.buildResultKey))
+        const merged = [...prev]
+        for (const row of rows) {
+          if (row.buildResultKey && !seen.has(row.buildResultKey)) {
+            seen.add(row.buildResultKey)
+            merged.push(row)
+          }
+        }
+        return merged
+      })
+      setPlanHistoryHasMore(hasMore)
+      setPlanHistoryOffset(start + HISTORY_PAGE_SIZE)
+    } finally {
+      setPlanHistoryLoadingMore(false)
+    }
+  }
 
   const prevTabRef = useRef(activeTab)
   useEffect(() => {
@@ -433,7 +472,19 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     )
   }
 
+  const routePlanKey = planKeyFromBuildResultKey(buildResultKey)
   const displayDetail: BuildDetailData = (() => {
+    const planKey = detail.plan?.key ?? routePlanKey
+    if (detail.buildResultKey !== buildResultKey) {
+      const snap = liveSnapshot?.buildResultKey === buildResultKey ? liveSnapshot : null
+      return {
+        ...detail,
+        buildResultKey,
+        buildNumber: buildNumberFromResultKey(buildResultKey, planKey),
+        buildState: snap?.buildState ?? detail.buildState,
+        lifeCycleState: snap?.lifeCycleState ?? detail.lifeCycleState,
+      }
+    }
     if (
       transitioning
       && liveSnapshot?.buildResultKey === buildResultKey
@@ -445,7 +496,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         ...(overlayStatus
           ? { buildState: liveSnapshot.buildState, lifeCycleState: liveSnapshot.lifeCycleState }
           : {}),
-        buildNumber: liveSnapshot.buildNumber ?? buildNumberFromResultKey(buildResultKey, detail.plan?.key),
+        buildNumber: liveSnapshot.buildNumber ?? buildNumberFromResultKey(buildResultKey, planKey),
       }
     }
     return detail
@@ -456,11 +507,8 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const deploying = (transitioning && liveSnapshot?.buildResultKey === buildResultKey)
     ? isBuildRunning(liveSnapshot)
     : shouldShowDeployProgress(displayDetail)
-  const displayBuildNumber = (transitioning && liveSnapshot?.buildResultKey === buildResultKey)
-    ? (liveSnapshot.buildNumber ?? buildNumberFromResultKey(buildResultKey, detail.plan?.key))
-    : (liveSnapshot?.buildNumber
-      ?? buildNumberFromResultKey(buildResultKey, displayDetail.plan?.key)
-      ?? displayDetail.buildNumber)
+  const displayBuildNumber = buildNumberFromResultKey(buildResultKey, routePlanKey)
+    || (detail.buildResultKey === buildResultKey ? detail.buildNumber : 0)
   const jiraCount = detail.jiraIssues?.jiraIssue?.length ?? 0
   const tabs = [
     { key: 'summary', label: 'Summary' },
@@ -592,7 +640,16 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         )}
         {activeTab === 'variables' && <VariablesTab variables={detail.variables?.variable ?? []} artifacts={detail.artifacts?.artifact ?? []} />}
         {activeTab === 'tests' && <TestsTab detail={detail} />}
-        {activeTab === 'history' && <HistoryTab results={planResults} loading={planResultsLoading} currentKey={buildResultKey} />}
+        {activeTab === 'history' && (
+          <HistoryTab
+            results={planResults}
+            loading={planResultsLoading}
+            currentKey={buildResultKey}
+            hasMore={planHistoryHasMore}
+            loadingMore={planHistoryLoadingMore}
+            onLoadMore={() => void loadMorePlanHistory()}
+          />
+        )}
       </div>
 
       {/* Run Customized Modal */}
@@ -1068,7 +1125,16 @@ function TestStat({ label, count, color }: { label: string; count: number; color
   )
 }
 
-function HistoryTab({ results, loading, currentKey }: { results: any[]; loading: boolean; currentKey: string }) {
+function HistoryTab({
+  results, loading, currentKey, hasMore, loadingMore, onLoadMore,
+}: {
+  results: any[]
+  loading: boolean
+  currentKey: string
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
+}) {
   const { t } = useI18n()
   if (loading) return <LoadingSpinner text="Loading plan history..." />
   if (!results.length) return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No build history available</div>
@@ -1130,6 +1196,23 @@ function HistoryTab({ results, loading, currentKey }: { results: any[]; loading:
           </div>
         )
       })}
+      {hasMore && onLoadMore && (
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12 }}>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            style={{
+              fontSize: 12, fontWeight: 510, padding: '8px 18px',
+              opacity: loadingMore ? 0.6 : 1,
+              transition: 'opacity 0.15s ease',
+            }}
+          >
+            {loadingMore ? t('common.loading_more') : t('common.load_more')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

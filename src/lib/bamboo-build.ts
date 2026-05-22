@@ -78,9 +78,11 @@ export function planKeyFromBuildResultKey(buildResultKey: string): string {
 export function resolveActiveBuildKey(
   routeKey: string,
   planKey: string,
-  pick: PlanBuildSnapshot | null
+  pick: PlanBuildSnapshot | null,
+  excludeKeys?: ReadonlySet<string>
 ): string {
   if (!pick?.buildResultKey) return routeKey
+  if (excludeKeys?.has(pick.buildResultKey)) return routeKey
   const routeBn = buildNumberFromResultKey(routeKey, planKey)
   const pickBn = pick.buildNumber ?? buildNumberFromResultKey(pick.buildResultKey, planKey)
   if (pickBn >= routeBn) return pick.buildResultKey
