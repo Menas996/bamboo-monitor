@@ -1,21 +1,8 @@
-import { Tray, Menu, BrowserWindow, nativeImage, NativeImage, app } from 'electron'
-import path from 'path'
+import { Tray, Menu, BrowserWindow, app } from 'electron'
+import { getTrayIcon } from './app-icon'
 
 export function setupTray(mainWindow: BrowserWindow, onRefresh: () => void): Tray {
-  const iconPath = path.join(__dirname, '../resources/trayIcon.png')
-  let trayIcon: NativeImage
-
-  try {
-    trayIcon = nativeImage.createFromPath(iconPath)
-  } catch {
-    trayIcon = nativeImage.createEmpty()
-  }
-
-  if (trayIcon.isEmpty()) {
-    trayIcon = nativeImage.createEmpty()
-  }
-
-  const tray = new Tray(trayIcon.resize({ width: 18, height: 18 }))
+  const tray = new Tray(getTrayIcon())
   tray.setToolTip('Bamboo Monitor')
 
   const contextMenu = Menu.buildFromTemplate([

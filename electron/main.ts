@@ -4,6 +4,7 @@ import Store from 'electron-store'
 import { BambooClient, BambooDeployResult } from './bamboo-client'
 import { startPolling, stopPolling, type FavoritePlan } from './poller'
 import { setupTray } from './tray'
+import { getAppIcon, setDockIcon } from './app-icon'
 import { logger } from './lib/logger'
 
 const store = new Store<{
@@ -35,11 +36,14 @@ if (!gotTheLock) {
   function createWindow() {
     logger.info('SYSTEM', 'Creating main window', { dev: isDev })
 
+    const appIcon = getAppIcon()
+
     mainWindow = new BrowserWindow({
       width: 1100,
       height: 720,
       minWidth: 800,
       minHeight: 600,
+      icon: appIcon.isEmpty() ? undefined : appIcon,
       titleBarStyle: 'hiddenInset',
       backgroundColor: '#08090a',
       webPreferences: {
@@ -217,6 +221,32 @@ if (!gotTheLock) {
       }
     })
 
+    ipcMain.handle(
+      'bamboo:getDeploymentsPage',
+      async (_e, projectKey: string, startIndex: number, pageSize: number) => {
+        if (!bamboo) return { deploys: [], hasMore: false }
+        try {
+          return await bamboo.getDeployResultsPage(projectKey, startIndex, pageSize)
+        } catch (err: any) {
+          logger.error('API', `getDeploymentsPage failed for ${projectKey}: ${err.message}`)
+          return { deploys: [], hasMore: false }
+        }
+      }
+    )
+
+    ipcMain.handle(
+      'bamboo:enrichDeployments',
+      async (_e, projectKey: string, buildResultKeys: string[]) => {
+        if (!bamboo) return []
+        try {
+          return await bamboo.enrichDeployResults(projectKey, buildResultKeys)
+        } catch (err: any) {
+          logger.error('API', `enrichDeployments failed: ${err.message}`)
+          return []
+        }
+      }
+    )
+
     ipcMain.handle('bamboo:getBuildLog', async (_e, buildResultKey: string) => {
       if (!bamboo) return null
       try {
@@ -277,6 +307,19 @@ if (!gotTheLock) {
         return []
       }
     })
+
+    ipcMain.handle(
+      'bamboo:getPlanResultsHistoryPage',
+      async (_e, planKey: string, startIndex: number, pageSize: number) => {
+        if (!bamboo) return { rows: [], hasMore: false }
+        try {
+          return await bamboo.getPlanResultsHistoryPage(planKey, startIndex, pageSize)
+        } catch (err: any) {
+          logger.error('API', `getPlanResultsHistoryPage failed for ${planKey}: ${err.message}`)
+          return { rows: [], hasMore: false }
+        }
+      }
+    )
 
     ipcMain.handle('bamboo:getProjectPlans', async (_e, projectKey: string) => {
       if (!bamboo) return []
@@ -383,17 +426,18 @@ if (!gotTheLock) {
     // --- Health Check ---
 
     ipcMain.handle('health:check', async () => {
-      const server = store.get('server')
-      const username = store.get('username')
-      const password = store.get('password')
+      const server = store.get('server') as string | undefined
+      const username = store.get('username') as string | undefined
+      const password = store.get('password') as string | undefined
+      const baseUrl = server?.replace(/\/+$/, '') ?? ''
 
       const checks: Record<string, { status: string; detail?: string; latency?: number }> = {}
 
       // Server connectivity
-      if (server) {
+      if (baseUrl) {
         const start = performance.now()
         try {
-          const res = await fetch(server, { signal: AbortSignal.timeout(5000) })
+          const res = await fetch(baseUrl, { signal: AbortSignal.timeout(5000) })
           checks.connectivity = {
             status: res.ok ? 'ok' : 'degraded',
             detail: `HTTP ${res.status}`,
@@ -410,11 +454,29 @@ if (!gotTheLock) {
         checks.connectivity = { status: 'not-configured' }
       }
 
-      // Auth status — use /rest/api/latest/project (deploy API is broken on this server)
+      // API auth — reuse Bamboo client (normalized base URL + basic/session auth)
       if (bamboo) {
+        const start = performance.now()
         try {
-          const start = performance.now()
-          const url = `${server}/rest/api/latest/project`
+          await bamboo.getProjects()
+          checks.api = {
+            status: 'ok',
+            detail: 'REST API OK',
+            latency: Math.round(performance.now() - start),
+          }
+        } catch (err: any) {
+          const msg = err.message ?? String(err)
+          const authLike = /401|403|unauthorized|forbidden/i.test(msg)
+          checks.api = {
+            status: authLike ? 'auth-failed' : 'error',
+            detail: msg.slice(0, 160),
+            latency: Math.round(performance.now() - start),
+          }
+        }
+      } else if (baseUrl && username && password) {
+        const start = performance.now()
+        const url = `${baseUrl}/rest/api/latest/project`
+        try {
           const res = await fetch(url, {
             headers: {
               Authorization: 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64'),
@@ -423,7 +485,7 @@ if (!gotTheLock) {
             signal: AbortSignal.timeout(5000),
           })
           checks.api = {
-            status: res.ok ? 'ok' : 'auth-failed',
+            status: res.ok ? 'ok' : (res.status === 401 || res.status === 403 ? 'auth-failed' : 'error'),
             detail: `HTTP ${res.status}`,
             latency: Math.round(performance.now() - start),
           }
@@ -464,6 +526,7 @@ if (!gotTheLock) {
       arch: process.arch,
     })
 
+    setDockIcon()
     createWindow()
 
     if (mainWindow && !isDev) {
