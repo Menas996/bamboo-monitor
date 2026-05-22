@@ -90,6 +90,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const pendingDeleteRef = useRef<string | null>(null)
   const seamlessNavRef = useRef(false)
   const prevBuildKeyRef = useRef<string | null>(null)
+  const prevPickRunningRef = useRef(false)
   const detailRef = useRef<BuildDetailData | null>(null)
   detailRef.current = detail
   const liveSnapshotRef = useRef<PlanBuildSnapshot | null>(null)
@@ -233,6 +234,10 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   }
 
   useEffect(() => {
+    prevPickRunningRef.current = false
+  }, [buildResultKey])
+
+  useEffect(() => {
     let cancelled = false
     const routePlanKey = planKeyFromBuildResultKey(buildResultKey)
 
@@ -265,7 +270,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         && planKeyFromBuildResultKey(prevKey) === planKey
       const seamless = seamlessNavRef.current || (samePlanSwitch && detailRef.current != null)
       const tab = activeTabRef.current
-      const fetchDetail = isInitial || LIVE_DETAIL_TABS.has(tab)
+      let fetchDetail = isInitial || LIVE_DETAIL_TABS.has(tab)
 
       if (isInitial) {
         if (seamless) {
@@ -288,6 +293,11 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
           (r) => !pendingDelete || r.buildResultKey !== pendingDelete
         )
         const pick = pickPlanBuildResult(list)
+        const pickRunning = !!(pick && isBuildRunning(pick))
+        if (!fetchDetail && prevPickRunningRef.current && !pickRunning && pick?.buildResultKey === buildResultKey) {
+          fetchDetail = true
+        }
+        prevPickRunningRef.current = pickRunning
         if (pendingDelete) {
           activeKey = buildResultKey
         } else {
@@ -299,6 +309,29 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
             return
           }
         }
+        // #region agent log
+        fetch('http://127.0.0.1:7522/ingest/f7723d59-4059-47b6-80a5-39e778755896', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f83b21' },
+          body: JSON.stringify({
+            sessionId: 'f83b21',
+            runId: 'deploy-status',
+            hypothesisId: 'H1-H3',
+            location: 'BuildDetail.tsx:refresh',
+            message: 'plan pick vs detail',
+            data: {
+              activeKey,
+              pickRunning,
+              pickState: pick?.buildState,
+              pickLife: pick?.lifeCycleState,
+              detailRunning: detailRef.current ? isBuildRunning(detailRef.current) : null,
+              detailState: detailRef.current?.buildState,
+              fetchDetail,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {})
+        // #endregion
       } catch {
         /* use route key */
       }
@@ -405,24 +438,14 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       transitioning
       && liveSnapshot?.buildResultKey === buildResultKey
     ) {
+      const overlayStatus = isBuildRunning(liveSnapshot) && isBuildRunning(detail)
       return {
         ...detail,
         buildResultKey: liveSnapshot.buildResultKey,
-        buildState: liveSnapshot.buildState,
-        lifeCycleState: liveSnapshot.lifeCycleState,
+        ...(overlayStatus
+          ? { buildState: liveSnapshot.buildState, lifeCycleState: liveSnapshot.lifeCycleState }
+          : {}),
         buildNumber: liveSnapshot.buildNumber ?? buildNumberFromResultKey(buildResultKey, detail.plan?.key),
-      }
-    }
-    if (
-      liveSnapshot?.buildResultKey === buildResultKey
-      && isBuildRunning(liveSnapshot)
-      && !isBuildRunning(detail)
-    ) {
-      return {
-        ...detail,
-        buildState: liveSnapshot.buildState,
-        lifeCycleState: liveSnapshot.lifeCycleState,
-        buildNumber: liveSnapshot.buildNumber ?? detail.buildNumber,
       }
     }
     return detail

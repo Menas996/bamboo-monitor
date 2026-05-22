@@ -107,10 +107,15 @@ export interface PlanBuildSnapshot {
   buildNumber?: number
 }
 
+export function isTerminalBuildState(buildState?: string): boolean {
+  return TERMINAL_BUILD.has(normalizeLifeToken(buildState))
+}
+
 export function isBuildRunning(detail: {
   lifeCycleState?: string
   buildState?: string
 }): boolean {
+  if (isTerminalBuildState(detail.buildState)) return false
   const life = normalizeLifeToken(detail.lifeCycleState)
   if (life === 'FINISHED') return false
   if (life === 'INPROGRESS' || life === 'QUEUED' || life === 'PENDING') return true
@@ -124,7 +129,9 @@ export function shouldShowDeployProgress(detail: {
   lifeCycleState?: string
   buildState?: string
 }): boolean {
+  if (isTerminalBuildState(detail.buildState)) return false
   const life = normalizeLifeToken(detail.lifeCycleState)
+  if (life === 'FINISHED') return false
   if (life === 'QUEUED' || life === 'INPROGRESS' || life === 'PENDING') return true
   return isBuildRunning(detail)
 }
@@ -272,6 +279,22 @@ export function computeDeployProgress(detail: Record<string, unknown>): {
   completedStages: number
   totalStages: number
 } {
+  if (
+    isTerminalBuildState(detail.buildState as string)
+    || normalizeLifeToken(detail.lifeCycleState as string) === 'FINISHED'
+  ) {
+    const stages = asArray(
+      (detail.stages as { stage?: unknown })?.stage
+      ?? (detail.plan as { stages?: { stage?: unknown } })?.stages?.stage
+    )
+    return {
+      percent: 100,
+      currentStage: null,
+      completedStages: stages.length,
+      totalStages: stages.length,
+    }
+  }
+
   const stages = asArray(
     (detail.stages as { stage?: unknown })?.stage
     ?? (detail.plan as { stages?: { stage?: unknown } })?.stages?.stage
