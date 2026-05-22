@@ -596,11 +596,65 @@ export class BambooClient {
     }
   }
 
-  async getPlanBuildResults(planKey: string, maxResults = 25, includeAllStates = false): Promise<BambooBuildResult[]> {
-    let path = `/rest/api/latest/result/${planKey}?max-results=${maxResults}`
+  async getPlanBuildResults(
+    planKey: string,
+    maxResults = 25,
+    includeAllStates = false,
+    startIndex = 0
+  ): Promise<BambooBuildResult[]> {
+    let path = `/rest/api/latest/result/${planKey}?max-results=${maxResults}&start-index=${startIndex}`
     if (includeAllStates) path += '&includeAllStates=true'
     const data = await this.request<BambooBuildResults>(path)
     return coerceBuildResults(data.results?.result).map(normalizeBambooBuildResult)
+  }
+
+  async getBuildResultsPage(
+    projectKey: string,
+    startIndex: number,
+    pageSize: number
+  ): Promise<{ results: BambooBuildResult[]; hasMore: boolean }> {
+    const data = await this.request<BambooBuildResults>(
+      `/rest/api/latest/result/${projectKey}?max-results=${pageSize + 1}&start-index=${startIndex}`
+    )
+    const batch = coerceBuildResults(data.results?.result).map(normalizeBambooBuildResult)
+    const hasMore = batch.length > pageSize
+    return { results: batch.slice(0, pageSize), hasMore }
+  }
+
+  async getDeployResultsPage(
+    projectKey: string,
+    startIndex: number,
+    pageSize: number
+  ): Promise<{ deploys: BambooDeployResult[]; hasMore: boolean }> {
+    const { results, hasMore } = await this.getBuildResultsPage(projectKey, startIndex, pageSize)
+    const deploys = dedupeBuildResultsByPlan(results).map((b) => buildResultToDeploy(b, projectKey))
+    return { deploys, hasMore }
+  }
+
+  async enrichDeployResults(
+    projectKey: string,
+    buildResultKeys: string[]
+  ): Promise<BambooDeployResult[]> {
+    const unique = [...new Set(buildResultKeys.filter(Boolean))]
+    if (unique.length === 0) return []
+    return mapInBatches(unique, 4, async (key) => {
+      const enriched = await this.enrichBuildResultForDeploy({ buildResultKey: key } as BambooBuildResult)
+      return buildResultToDeploy(enriched, projectKey)
+    })
+  }
+
+  async getPlanResultsHistoryPage(
+    planKey: string,
+    startIndex: number,
+    pageSize: number
+  ): Promise<{ rows: PlanHistoryRow[]; hasMore: boolean }> {
+    const queued = startIndex === 0 ? await this.getQueuedBuildsForPlan(planKey) : []
+    const fetchSize = pageSize + 1
+    const batch = await this.getPlanBuildResults(planKey, fetchSize, true, startIndex)
+    const hasMore = batch.length > pageSize
+    const page = batch.slice(0, pageSize)
+    const merged = mergeBuildResultsByKey(queued, page)
+    return { rows: merged.map(buildResultToPlanHistoryRow), hasMore }
   }
 
   async getBuildDetail(buildResultKey: string): Promise<any> {
@@ -836,8 +890,15 @@ export class BambooClient {
   }
 
   async getDeployResults(projectKey: string): Promise<BambooDeployResult[]> {
-    const builds = dedupeBuildResultsByPlan(await this.getBuildResults(projectKey))
-    const enriched = await mapInBatches(builds, 6, (b) => this.enrichBuildResultForDeploy(b))
-    return enriched.map((b) => buildResultToDeploy(b, projectKey))
+    const all: BambooBuildResult[] = []
+    let start = 0
+    const pageSize = 50
+    while (true) {
+      const { results, hasMore } = await this.getBuildResultsPage(projectKey, start, pageSize)
+      all.push(...results)
+      if (!hasMore) break
+      start += pageSize
+    }
+    return dedupeBuildResultsByPlan(all).map((b) => buildResultToDeploy(b, projectKey))
   }
 }
