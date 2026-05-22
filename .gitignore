@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-electron/
+release/
+.DS_Store
+.env
+.env.*
+*.log
+.cursor/debug-*.log
+.claude/settings.local.json
+*.bak

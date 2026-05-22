@@ -1,0 +1,43 @@
+---
+description: Electron 主进程、IPC 与 Bamboo API 约定
+globs: electron/**/*
+alwaysApply: false
+---
+
+# Electron 主进程
+
+## 安全
+
+- `contextIsolation: true`，`nodeIntegration: false`
+- 仅通过 `preload.ts` 的 `contextBridge` 暴露 API
+- 勿向 renderer 暴露 `fs`、`shell`（除 `actions.openUrl` 等已封装 handler）
+
+## IPC 命名
+
+- Bamboo：`bamboo:login`、`bamboo:getProjects`、`bamboo:getDeployments` 等
+- 配置：`config:get` / `config:set`（`electron-store`）
+- 轮询：`poll:start` / `poll:stop`
+- 窗口：`window:minimize` 等
+- 主→渲染推送：用 `webContents.send`，preload 里 `ipcRenderer.on` 再 `dispatchEvent`
+
+## BambooClient
+
+- 类型定义在 `bamboo-client.ts` 顶部，与 Bamboo 6.x REST 响应对齐
+- HTTP 失败用指数退避重试（最多 3 次）
+- 敏感信息只存 `electron-store`，日志用 `logger`，勿 `console.log` 密码
+
+## 日志
+
+```typescript
+import { logger } from './lib/logger'
+logger.info('API', 'Fetched projects', { count: list.length })
+logger.error('POLL', 'Poll failed', { projectKey, error: String(err) })
+```
+
+类别：`SYSTEM` | `AUTH` | `API` | `POLL` | `NOTIFY` | `UI` | `IPC` | `CONFIG`
+
+## 新增 handler 检查清单
+
+1. `ipcMain.handle` 在 `main.ts`，校验参数、检查 `bamboo` 已登录
+2. `preload.ts` 暴露对应方法
+3. `src/App.tsx` 的 `declare global { interface Window { ... } }` 补充类型

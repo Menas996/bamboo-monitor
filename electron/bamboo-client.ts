@@ -1,0 +1,843 @@
+import { logger } from './lib/logger'
+
+// --- Types matching your Bamboo 6.10.4 server responses ---
+
+export interface BambooProject {
+  key: string
+  name: string
+  description?: string
+  link?: { href: string; rel: string }
+}
+
+export interface BambooPlan {
+  key: string
+  name: string
+  shortName: string
+  shortKey: string
+  type: string
+  enabled: boolean
+  planKey?: { key: string }
+  link?: { href: string; rel: string }
+}
+
+export interface BambooBuildResult {
+  buildResultKey: string
+  lifeCycleState?: string
+  buildState?: string
+  buildNumber?: number
+  startTime?: number
+  finishedDate?: number
+  buildDuration?: number
+  buildDurationInSeconds?: number
+  buildReason?: string
+  reason?: string
+  triggerReason?: string
+  changes?: { changes: { changeSet: any[] } }
+  plan?: BambooPlan
+  link?: { href: string; rel: string }
+}
+
+export interface BambooBuildResults {
+  results: {
+    size: number
+    expand: string
+    'start-index': number
+    'max-result': number
+    result: BambooBuildResult | BambooBuildResult[]
+  }
+}
+
+interface BambooQueuedBuild {
+  planKey: string
+  buildNumber: number
+  buildResultKey: string
+  triggerReason?: string
+}
+
+interface BambooQueueResponse {
+  queuedBuilds?: {
+    queuedBuild?: BambooQueuedBuild | BambooQueuedBuild[]
+  }
+}
+
+export interface QueueBuildResult {
+  success: boolean
+  buildResultKey?: string
+}
+
+function coerceBuildResults(
+  result: BambooBuildResult | BambooBuildResult[] | null | undefined
+): BambooBuildResult[] {
+  if (result == null) return []
+  return Array.isArray(result) ? result : [result]
+}
+
+function coerceQueuedBuilds(raw: BambooQueuedBuild | BambooQueuedBuild[] | null | undefined): BambooQueuedBuild[] {
+  if (raw == null) return []
+  return Array.isArray(raw) ? raw : [raw]
+}
+
+function mergeBuildResultsByKey(...groups: BambooBuildResult[][]): BambooBuildResult[] {
+  const byKey = new Map<string, BambooBuildResult>()
+  for (const group of groups) {
+    for (const b of group) {
+      if (!b.buildResultKey) continue
+      const prev = byKey.get(b.buildResultKey)
+      const bn = b.buildNumber ?? 0
+      const prevBn = prev?.buildNumber ?? 0
+      if (!prev || bn >= prevBn) byKey.set(b.buildResultKey, b)
+    }
+  }
+  return [...byKey.values()].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
+}
+
+const TERMINAL_BUILD_STATES = new Set(['SUCCESSFUL', 'SUCCESS', 'FAILED', 'FAILURE', 'CANCELLED'])
+
+export function pickLatestPlanBuild(results: BambooBuildResult[]): BambooBuildResult | null {
+  if (results.length === 0) return null
+  const sorted = [...results].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
+  for (const r of sorted) {
+    const life = (r.lifeCycleState ?? '').toUpperCase().replace(/[\s_-]+/g, '')
+    if (life === 'FINISHED') continue
+    if (life === 'INPROGRESS' || life === 'QUEUED' || life === 'PENDING') return r
+    const st = (r.buildState ?? '').toUpperCase()
+    if (st === 'NOT_BUILT' || st === 'NOTBUILT') return r
+    if (!st || st === 'UNKNOWN' || st === 'INPROGRESS' || st === 'RUNNING') return r
+    if (!TERMINAL_BUILD_STATES.has(st)) return r
+  }
+  return sorted[0] ?? null
+}
+
+function dedupeBuildResultsByPlan(builds: BambooBuildResult[]): BambooBuildResult[] {
+  const map = new Map<string, BambooBuildResult>()
+  for (const b of builds) {
+    const planKey = b.plan?.key ?? ''
+    if (!planKey) continue
+    const bn = b.buildNumber ?? 0
+    const prev = map.get(planKey)
+    if (!prev || bn > (prev.buildNumber ?? 0)) map.set(planKey, b)
+  }
+  return [...map.values()].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
+}
+
+function parseTimestamp(v: unknown): number | undefined {
+  if (v == null || v === '') return undefined
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v
+  if (typeof v === 'string') {
+    const n = Number(v)
+    if (Number.isFinite(n) && n > 0) return n
+    const d = Date.parse(v)
+    if (Number.isFinite(d) && d > 0) return d
+  }
+  return undefined
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function coerceReasonRaw(raw: unknown): string {
+  if (raw == null) return ''
+  if (typeof raw === 'string') return raw
+  if (typeof raw === 'object') {
+    const o = raw as Record<string, unknown>
+    for (const k of ['html', 'body', 'text', 'reason', 'name', 'description', 'summary']) {
+      const v = o[k]
+      if (typeof v === 'string' && v.trim()) return v
+    }
+  }
+  return ''
+}
+
+function extractTriggerLabel(b: BambooBuildResult): string {
+  const extra = b as BambooBuildResult & Record<string, unknown>
+  const raw =
+    coerceReasonRaw(b.buildReason) ||
+    coerceReasonRaw(extra.reasonSummary) ||
+    coerceReasonRaw(b.reason) ||
+    coerceReasonRaw(b.triggerReason) ||
+    ''
+  if (!raw.trim()) return ''
+  const text = stripHtml(raw)
+  if (!text) return ''
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text
+}
+
+function parseBuildStartTime(b: BambooBuildResult): number | undefined {
+  const extra = b as BambooBuildResult & Record<string, unknown>
+  return (
+    parseTimestamp(b.startTime) ??
+    parseTimestamp(extra.buildStartedTime) ??
+    parseTimestamp(extra.buildDate) ??
+    parseTimestamp(extra.buildStarted)
+  )
+}
+
+function parseBuildFinishedTime(b: BambooBuildResult): number | undefined {
+  const extra = b as BambooBuildResult & Record<string, unknown>
+  return (
+    parseTimestamp(b.finishedDate) ??
+    parseTimestamp(extra.buildCompletedDate) ??
+    parseTimestamp(extra.buildCompletedTime) ??
+    parseTimestamp(extra.buildFinishedTime)
+  )
+}
+
+function hasDeployMeta(b: BambooBuildResult): boolean {
+  const n = normalizeBambooBuildResult(b)
+  return !!(extractTriggerLabel(n) && (parseBuildStartTime(n) || parseBuildFinishedTime(n)))
+}
+
+async function mapInBatches<T, R>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = []
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize)
+    out.push(...await Promise.all(batch.map(fn)))
+  }
+  return out
+}
+
+export function normalizeBambooBuildResult(b: BambooBuildResult): BambooBuildResult {
+  const buildReason = b.buildReason ?? b.reason
+  const reason = b.reason ?? b.buildReason
+  return {
+    ...b,
+    buildReason,
+    reason,
+    startTime: parseBuildStartTime(b),
+    finishedDate: parseBuildFinishedTime(b),
+  }
+}
+
+export interface PlanHistoryRow {
+  buildResultKey: string
+  buildState?: string
+  lifeCycleState?: string
+  buildNumber?: number
+  reason?: string
+  startTime?: number
+  buildDuration?: number
+  buildDurationInSeconds?: number
+}
+
+export function buildResultToPlanHistoryRow(b: BambooBuildResult): PlanHistoryRow {
+  const n = normalizeBambooBuildResult(b)
+  const extra = n as BambooBuildResult & Record<string, unknown>
+  const trigger = extractTriggerLabel(n)
+  const start = parseBuildStartTime(n)
+  const finish = parseBuildFinishedTime(n)
+  let buildDurationInSeconds = typeof n.buildDurationInSeconds === 'number'
+    ? n.buildDurationInSeconds
+    : undefined
+  let buildDuration = typeof n.buildDuration === 'number' ? n.buildDuration : undefined
+  if (buildDurationInSeconds == null && typeof extra.buildDurationInSeconds === 'number') {
+    buildDurationInSeconds = extra.buildDurationInSeconds
+  }
+  if (buildDuration == null && typeof extra.buildDuration === 'number') {
+    buildDuration = extra.buildDuration
+  }
+  if (buildDurationInSeconds == null && start && finish && finish > start) {
+    buildDurationInSeconds = Math.round((finish - start) / 1000)
+  }
+  return {
+    buildResultKey: n.buildResultKey,
+    buildState: n.buildState,
+    lifeCycleState: n.lifeCycleState,
+    buildNumber: n.buildNumber,
+    reason: trigger || undefined,
+    startTime: start,
+    buildDuration,
+    buildDurationInSeconds,
+  }
+}
+
+export function buildResultToDeploy(b: BambooBuildResult, projectKey: string): BambooDeployResult {
+  const normalized = normalizeBambooBuildResult(b)
+  const trigger = extractTriggerLabel(normalized)
+  const started = normalized.startTime
+  const finished = normalized.finishedDate
+  return {
+    buildResultKey: normalized.buildResultKey,
+    deploymentResult: {
+      deploymentState: normalized.buildState ?? 'UNKNOWN',
+      state: normalized.buildState ?? 'UNKNOWN',
+      startedDate: started,
+      finishedDate: finished,
+      reason: trigger || undefined,
+      initiator: trigger ? { name: trigger } : undefined,
+    },
+    environment: {
+      key: normalized.plan?.key ?? projectKey,
+      name: normalized.plan?.name ?? projectKey,
+    },
+    project: { key: projectKey, name: projectKey },
+    plan: normalized.plan?.key
+      ? { key: normalized.plan.key, name: normalized.plan.name ?? normalized.plan.key }
+      : undefined,
+    deployment: {
+      id: normalized.buildNumber ?? 0,
+      deploymentState: normalized.buildState ?? 'UNKNOWN',
+    },
+  }
+}
+
+// Keep old types for backward compatibility with renderer
+export interface BambooDeployProject {
+  key: string
+  name: string
+  description?: string
+  environments: { key: string; name: string }[]
+}
+
+export interface BambooDeployResult {
+  buildResultKey?: string
+  deploymentResult: {
+    deploymentState: string
+    state: string
+    startedDate?: number
+    finishedDate?: number
+    reason?: string
+    initiator?: { name: string }
+  } | null
+  environment: { key: string; name: string }
+  project: { key: string; name: string }
+  plan?: { key: string; name: string }
+  deployment?: { id: number; deploymentState: string }
+}
+
+export class BambooClient {
+  private baseUrl: string
+  private username: string
+  private password: string
+  private auth: string
+  private cookies: Record<string, string> = {}
+  private authMethod: 'basic' | 'session' | null = null
+
+  constructor(server: string, username: string, password: string) {
+    this.baseUrl = server.replace(/\/+$/, '')
+    this.username = username
+    this.password = password
+    this.auth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
+    logger.info('AUTH', `Client created for ${this.baseUrl}`, { username })
+  }
+
+  private parseCookies(setCookieHeaders: string[] | null): void {
+    if (!setCookieHeaders) return
+    for (const header of setCookieHeaders) {
+      const [pair] = header.split(';')
+      const [name, ...rest] = pair.split('=')
+      if (name) {
+        this.cookies[name.trim()] = rest.join('=').trim()
+      }
+    }
+  }
+
+  private getCookieHeader(): string {
+    return Object.entries(this.cookies)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ')
+  }
+
+  private async request<T>(path: string, options?: { method?: string }): Promise<T> {
+    const url = `${this.baseUrl}${path}`
+    const method = options?.method ?? 'GET'
+    const start = performance.now()
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+    }
+
+    if (this.authMethod === 'session') {
+      const cookieHeader = this.getCookieHeader()
+      if (cookieHeader) {
+        headers['Cookie'] = cookieHeader
+      }
+    } else {
+      headers['Authorization'] = this.auth
+    }
+
+    logger.apiRequest(method, url, { authMethod: this.authMethod ?? 'unknown' })
+
+    let res: Response
+    try {
+      res = await fetch(url, { method, headers })
+    } catch (err: any) {
+      const duration = Math.round(performance.now() - start)
+      logger.apiError(method, url, err, duration)
+      throw err
+    }
+
+    const duration = Math.round(performance.now() - start)
+
+    const setCookie = res.headers.getSetCookie?.() ?? []
+    this.parseCookies(setCookie)
+
+    if (!res.ok) {
+      let body = ''
+      try { body = await res.text() } catch { /* ignore */ }
+      logger.apiResponse(method, url, res.status, duration, {
+        statusText: res.statusText,
+        body: body.slice(0, 300),
+      })
+      throw new Error(`Bamboo API error: ${res.status} ${res.statusText}`)
+    }
+
+    const data = await res.json()
+    logger.apiResponse(method, url, res.status, duration, {
+      keys: Object.keys(data),
+    })
+
+    return data as T
+  }
+
+  // --- Form-based session login (Bamboo 6.x Struts) ---
+
+  async sessionLogin(): Promise<boolean> {
+    logger.info('AUTH', 'Attempting form-based session login (Bamboo 6.x)')
+
+    try {
+      // Step 1: GET login page to extract CSRF token + session cookies
+      const loginPageRes = await fetch(`${this.baseUrl}/userlogin!doDefault.action`, {
+        redirect: 'manual',
+      })
+
+      const step1Cookies = loginPageRes.headers.getSetCookie?.() ?? []
+      this.parseCookies(step1Cookies)
+
+      const loginHtml = await loginPageRes.text()
+
+      const tokenMatch = loginHtml.match(/atl_token"\s*value="([^"]+)"/)
+      if (!tokenMatch) {
+        logger.error('AUTH', 'Could not extract atl_token from login page')
+        return false
+      }
+      const atlToken = tokenMatch[1]
+      logger.info('AUTH', 'Extracted CSRF token', { atlToken: atlToken.slice(0, 8) + '...' })
+
+      // Step 2: POST login form
+      const formData = new URLSearchParams({
+        os_destination: '/start.action',
+        os_username: this.username,
+        os_password: this.password,
+        checkBoxFields: 'os_cookie',
+        os_cookie: 'true',
+        atl_token: atlToken,
+        save: 'Log in',
+      })
+
+      const cookieHeader = this.getCookieHeader()
+      const loginRes = await fetch(`${this.baseUrl}/userlogin.action`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Cookie: cookieHeader,
+        },
+        body: formData.toString(),
+        redirect: 'manual',
+      })
+
+      const step2Cookies = loginRes.headers.getSetCookie?.() ?? []
+      this.parseCookies(step2Cookies)
+
+      const loginReason = loginRes.headers.get('X-Seraph-LoginReason')
+      logger.info('AUTH', `Login POST: ${loginRes.status}`, { loginReason })
+
+      if (loginReason === 'AUTHENTICATED_FAILED') {
+        logger.warn('AUTH', 'Credentials rejected')
+        return false
+      }
+
+      // Follow redirect
+      if (loginRes.status >= 300 && loginRes.status < 400) {
+        const location = loginRes.headers.get('location')
+        if (location) {
+          const finalUrl = location.startsWith('http') ? location : `${this.baseUrl}${location}`
+          const followRes = await fetch(finalUrl, {
+            headers: { Cookie: this.getCookieHeader() },
+            redirect: 'manual',
+          })
+          const followCookies = followRes.headers.getSetCookie?.() ?? []
+          this.parseCookies(followCookies)
+        }
+      }
+
+      // Step 3: Verify session
+      const verified = await this.verifySession()
+      logger.info('AUTH', `Session verification: ${verified ? 'OK' : 'FAILED'}`)
+      return verified
+    } catch (err: any) {
+      logger.error('AUTH', `Session login error: ${err.message}`)
+      return false
+    }
+  }
+
+  private async verifySession(): Promise<boolean> {
+    const cookieHeader = this.getCookieHeader()
+    if (!cookieHeader) return false
+
+    try {
+      const res = await fetch(`${this.baseUrl}/rest/api/latest/project`, {
+        headers: {
+          Cookie: cookieHeader,
+          Accept: 'application/json',
+        },
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
+  async validateAuth(): Promise<boolean> {
+    logger.info('AUTH', 'Validating credentials', { server: this.baseUrl })
+
+    // Try Basic Auth first
+    try {
+      const res = await fetch(`${this.baseUrl}/rest/api/latest/project`, {
+        headers: {
+          Authorization: this.auth,
+          Accept: 'application/json',
+        },
+      })
+      if (res.ok) {
+        this.authMethod = 'basic'
+        logger.info('AUTH', 'Basic auth succeeded')
+        return true
+      }
+    } catch (err: any) {
+      logger.apiError('GET', `${this.baseUrl}/rest/api/latest/project`, err)
+    }
+
+    // Fall back to session login
+    logger.info('AUTH', 'Basic auth failed, trying form-based session login')
+    const sessionOk = await this.sessionLogin()
+    if (sessionOk) {
+      this.authMethod = 'session'
+      return true
+    }
+
+    logger.error('AUTH', 'All auth methods failed')
+    return false
+  }
+
+  // --- API Methods ---
+
+  async getProjects(): Promise<BambooProject[]> {
+    const data = await this.request<{ projects: { project: BambooProject[] } }>(
+      '/rest/api/latest/project'
+    )
+    const projects = data.projects?.project ?? []
+    logger.info('API', `Fetched ${projects.length} projects`)
+    return projects
+  }
+
+  async getProjectDetail(key: string): Promise<any> {
+    return this.request(`/rest/api/latest/project/${key}`)
+  }
+
+  async getProjectPlans(projectKey: string): Promise<BambooPlan[]> {
+    const data = await this.request<{ plans: { plan: BambooPlan[]; size: number } }>(
+      `/rest/api/latest/project/${projectKey}?expand=plans`
+    )
+    const plans = data.plans?.plan ?? []
+    logger.info('API', `Fetched ${plans.length} plans for ${projectKey}`)
+    return plans
+  }
+
+  async getBuildResults(projectKey: string): Promise<BambooBuildResult[]> {
+    const allResults: BambooBuildResult[] = []
+    let start = 0
+    const pageSize = 50
+
+    while (true) {
+      const data = await this.request<BambooBuildResults>(
+        `/rest/api/latest/result/${projectKey}?max-results=${pageSize}&start-index=${start}`
+      )
+      const results = coerceBuildResults(data.results?.result).map(normalizeBambooBuildResult)
+      allResults.push(...results)
+
+      if (results.length < pageSize) break
+      start += pageSize
+    }
+
+    logger.info('API', `Fetched ${allResults.length} build results for ${projectKey}`)
+    return allResults
+  }
+
+  async getQueuedBuildsForPlan(planKey: string): Promise<BambooBuildResult[]> {
+    try {
+      const data = await this.request<BambooQueueResponse>(
+        '/rest/api/latest/queue?expand=queuedBuilds'
+      )
+      return coerceQueuedBuilds(data.queuedBuilds?.queuedBuild)
+        .filter((q) => q.planKey === planKey)
+        .map((q) => ({
+          buildResultKey: q.buildResultKey,
+          buildNumber: q.buildNumber,
+          buildState: 'Unknown',
+          lifeCycleState: 'Queued',
+          plan: {
+            key: q.planKey,
+            name: q.planKey,
+            shortName: q.planKey,
+            shortKey: q.planKey,
+            type: 'chain',
+            enabled: true,
+          },
+        }))
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.error('API', `getQueuedBuildsForPlan(${planKey}): ${msg}`)
+      return []
+    }
+  }
+
+  async getPlanBuildResults(planKey: string, maxResults = 25, includeAllStates = false): Promise<BambooBuildResult[]> {
+    let path = `/rest/api/latest/result/${planKey}?max-results=${maxResults}`
+    if (includeAllStates) path += '&includeAllStates=true'
+    const data = await this.request<BambooBuildResults>(path)
+    return coerceBuildResults(data.results?.result).map(normalizeBambooBuildResult)
+  }
+
+  async getBuildDetail(buildResultKey: string): Promise<any> {
+    return this.request(
+      `/rest/api/latest/result/${buildResultKey}?expand=vcsRevisions,plan.stages,plan,changes.change,stages.stage.results,stages.stage.jobs.job.tasks,artifacts,variables,labels,jiraIssues`
+    )
+  }
+
+  async getPlanDetail(planKey: string): Promise<any> {
+    return this.request(
+      `/rest/api/latest/plan/${planKey}?expand=stages.stage.jobs.job.tasks,branches`
+    )
+  }
+
+  async getPlanResults(planKey: string): Promise<BambooBuildResult[]> {
+    const [queued, results] = await Promise.all([
+      this.getQueuedBuildsForPlan(planKey),
+      this.getPlanBuildResults(planKey, 25, true),
+    ])
+    return mergeBuildResultsByKey(queued, results)
+  }
+
+  async getPlanResultsEnriched(planKey: string): Promise<PlanHistoryRow[]> {
+    const results = await this.getPlanResults(planKey)
+    const enriched = await mapInBatches(results, 6, (b) => this.enrichBuildResultForDeploy(b))
+    return enriched.map(buildResultToPlanHistoryRow)
+  }
+
+  async getBuildLog(buildResultKey: string): Promise<string> {
+    try {
+      const cookieHeader = this.getCookieHeader()
+      const res = await fetch(`${this.baseUrl}/rest/api/latest/result/${buildResultKey}/log`, {
+        headers: {
+          Accept: 'text/plain',
+          ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
+        },
+      })
+      if (!res.ok) return ''
+      const text = await res.text()
+      // Extract last 2000 chars (where errors usually appear)
+      return text.slice(-2000)
+    } catch {
+      return ''
+    }
+  }
+
+  async getFullBuildLog(buildResultKey: string): Promise<string> {
+    try {
+      const cookieHeader = this.getCookieHeader()
+      const res = await fetch(`${this.baseUrl}/rest/api/latest/result/${buildResultKey}/log`, {
+        headers: {
+          Accept: 'text/plain',
+          ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
+        },
+      })
+      if (!res.ok) return ''
+      return await res.text()
+    } catch {
+      return ''
+    }
+  }
+
+  extractErrorFromLog(log: string): string | null {
+    const errorPatterns = [
+      /ERROR[:\s]+(.+)/i,
+      /FAILURE[:\s]+(.+)/i,
+      /FAILED[:\s]+(.+)/i,
+      /Exception[:\s]+(.+)/i,
+      /BUILD FAILURE/,
+      /Build failed/i,
+      /exit code [1-9]/i,
+    ]
+    for (const pattern of errorPatterns) {
+      const match = log.match(pattern)
+      if (match) {
+        const msg = match[0].trim()
+        return msg.length > 200 ? msg.slice(0, 200) + '...' : msg
+      }
+    }
+    // Return last non-empty line as fallback
+    const lines = log.split('\n').filter((l) => l.trim())
+    if (lines.length > 0) {
+      const last = lines[lines.length - 1].trim()
+      return last.length > 200 ? last.slice(0, 200) + '...' : last
+    }
+    return null
+  }
+
+  async getAllBuildResults(): Promise<BambooBuildResult[]> {
+    const data = await this.request<BambooBuildResults>(
+      '/rest/api/latest/result?max-results=50'
+    )
+    return coerceBuildResults(data.results?.result)
+  }
+
+  // --- Build Action Methods ---
+
+  async queueBuild(planKey: string, variables?: Record<string, string>): Promise<QueueBuildResult> {
+    try {
+      let url = `${this.baseUrl}/rest/api/latest/queue/${planKey}`
+      const params = new URLSearchParams()
+      if (variables) {
+        for (const [k, v] of Object.entries(variables)) {
+          params.append(`bamboo.variable.${k}`, v)
+        }
+      }
+      const queryString = params.toString()
+      if (queryString) url += `?${queryString}`
+
+      const cookieHeader = this.getCookieHeader()
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
+          Accept: 'application/json',
+        },
+      })
+
+      let buildResultKey: string | undefined
+      const location = res.headers.get('Location') ?? res.headers.get('location')
+      if (location) {
+        const m = location.match(/\/result\/([^/?#]+)/i)
+        if (m?.[1]) buildResultKey = decodeURIComponent(m[1])
+      }
+      if (!buildResultKey && res.ok) {
+        try {
+          const body = await res.json() as { buildResultKey?: string; key?: string }
+          buildResultKey = body.buildResultKey ?? body.key
+        } catch {
+          /* empty body */
+        }
+      }
+
+      logger.info('API', `queueBuild(${planKey}): ${res.status}`, { buildResultKey })
+      return { success: res.ok, buildResultKey }
+    } catch (err: any) {
+      logger.error('API', `queueBuild failed: ${err.message}`)
+      return { success: false }
+    }
+  }
+
+  private parseBuildResultKeyForDelete(
+    buildResultKey: string
+  ): { planKey: string; buildNumber: number } | null {
+    const idx = buildResultKey.lastIndexOf('-')
+    if (idx <= 0) return null
+    const suffix = buildResultKey.slice(idx + 1)
+    if (!/^\d+$/.test(suffix)) return null
+    const planKey = buildResultKey.slice(0, idx)
+    const buildNumber = Number(suffix)
+    if (!planKey || !Number.isFinite(buildNumber) || buildNumber <= 0) return null
+    return { planKey, buildNumber }
+  }
+
+  async deleteBuildResult(buildResultKey: string): Promise<boolean> {
+    const parsed = this.parseBuildResultKeyForDelete(buildResultKey)
+    if (!parsed) {
+      logger.error('API', `deleteBuildResult: invalid key ${buildResultKey}`)
+      return false
+    }
+
+    try {
+      const cookieHeader = this.getCookieHeader()
+      const body = new URLSearchParams({
+        buildKey: parsed.planKey,
+        buildNumber: String(parsed.buildNumber),
+      })
+      const res = await fetch(`${this.baseUrl}/build/admin/deletePlanResults.action`, {
+        method: 'POST',
+        headers: {
+          ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Atlassian-Token': 'no-check',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: body.toString(),
+        redirect: 'manual',
+      })
+      const ok = res.status === 302 || res.status === 200 || res.status === 204
+      logger.info('API', `deleteBuildResult(${buildResultKey}): ${res.status}`, {
+        planKey: parsed.planKey,
+        buildNumber: parsed.buildNumber,
+        ok,
+      })
+      return ok
+    } catch (err: any) {
+      logger.error('API', `deleteBuildResult failed: ${err.message}`)
+      return false
+    }
+  }
+
+  getBambooUrl(path: string): string {
+    return `${this.baseUrl}${path}`
+  }
+
+  getServerUrl(): string {
+    return this.baseUrl
+  }
+
+  // --- Backward-compatible wrappers for renderer ---
+
+  async getDeployProjects(): Promise<BambooDeployProject[]> {
+    const projects = await this.getProjects()
+    return projects.map((p) => ({
+      key: p.key,
+      name: p.name,
+      description: p.description ?? '',
+      environments: [], // Deploy API unavailable on this server
+    }))
+  }
+
+  async enrichBuildResultForDeploy(b: BambooBuildResult): Promise<BambooBuildResult> {
+    if (hasDeployMeta(b)) return normalizeBambooBuildResult(b)
+    try {
+      const detail = await this.request<BambooBuildResult & Record<string, unknown>>(
+        `/rest/api/latest/result/${b.buildResultKey}`
+      )
+      const extra = detail as Record<string, unknown>
+      return normalizeBambooBuildResult({
+        ...b,
+        ...detail,
+        buildReason:
+          detail.buildReason ??
+          (typeof extra.reasonSummary === 'string' ? extra.reasonSummary : undefined) ??
+          b.buildReason,
+        plan: b.plan ?? detail.plan,
+      } as BambooBuildResult)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.error('API', `enrichBuildResult(${b.buildResultKey}): ${msg}`)
+      return normalizeBambooBuildResult(b)
+    }
+  }
+
+  async getDeployResults(projectKey: string): Promise<BambooDeployResult[]> {
+    const builds = dedupeBuildResultsByPlan(await this.getBuildResults(projectKey))
+    const enriched = await mapInBatches(builds, 6, (b) => this.enrichBuildResultForDeploy(b))
+    return enriched.map((b) => buildResultToDeploy(b, projectKey))
+  }
+}

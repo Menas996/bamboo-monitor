@@ -1,0 +1,48 @@
+---
+description: UI 样式、主题变量与过渡动画
+globs: src/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# UI 与样式
+
+## 设计系统（Linear 暗色为主）
+
+颜色与间距用 **CSS 变量**，勿硬编码 `#08090a`（加载屏等极少数例外）：
+
+- 背景：`var(--bg-page)`、`var(--bg-panel)`、`var(--bg-surface)`、`var(--bg-elevated)`
+- 文字：`var(--text-primary)` … `var(--text-quaternary)`
+- 强调：`var(--accent)`、`var(--accent-hover)`
+- 状态：`var(--success)`、`var(--error)`、`var(--warning)`
+- 圆角：`var(--radius-sm)` … `var(--radius-xl)`
+
+主题切换由 `ThemeProvider` 写入 `document.documentElement` style。
+
+## 优先使用的类（`globals.css`）
+
+- `.input-linear`、`.btn-primary`、`.btn-ghost`、`.card-surface`、`.select-linear`
+- `.animate-spin` — 加载指示
+- Tailwind 工具类作布局补充（`flex`、`gap` 等）
+
+## 动画与反馈
+
+交互需有轻微过渡，避免生硬跳变：
+
+```tsx
+style={{ transition: 'background 0.15s ease, border-color 0.15s ease' }}
+```
+
+- 悬停：卡片用 `.card-surface:hover`，按钮用已有 `:hover`
+- 列表/面板出现：可加 `opacity` + `transform` 短动画（150–200ms）
+- 禁用态：`opacity: 0.5; cursor: not-allowed`
+- 页面切换：保持与 `body` 一致的 `0.2s ease` 背景/文字过渡
+
+## 布局
+
+- 顶栏 `TitleBar` 固定高度；内容区 `paddingTop: 38`
+- 响应式：`hide-mobile`（≤900px）、`hide-small`（≤600px）
+- 字体：Inter + `font-feature-settings: 'cv01', 'ss03'`
+
+## 状态展示
+
+构建/部署状态用 `StatusBadge`，阶段进度用现有组件模式；成功/失败/进行中颜色与 CSS 变量一致。

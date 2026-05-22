@@ -1,0 +1,42 @@
+---
+description: Bamboo Monitor 项目架构、命令与目录约定
+alwaysApply: true
+---
+
+# Bamboo Monitor 概览
+
+Electron + React + Vite 的 macOS Bamboo CI/CD 监控桌面应用。
+
+## 命令
+
+- `npm run dev` — Vite 热重载（主进程 + 渲染进程）
+- `npm run build` — `tsc` → `vite build` → `electron-builder`
+- `npm install` — 安装依赖
+
+## 目录
+
+| 路径 | 职责 |
+|------|------|
+| `electron/main.ts` | 入口、BrowserWindow、**全部 IPC**、`electron-store`、托盘、通知 |
+| `electron/preload.ts` | `contextBridge` 暴露 `window.bamboo/config/poll/win/logs/health/actions` |
+| `electron/bamboo-client.ts` | Bamboo REST（Basic/Session、重试、类型定义） |
+| `electron/poller.ts` | 轮询新构建，回调通知 |
+| `electron/tray.ts` | 菜单栏托盘 |
+| `electron/lib/logger.ts` | 主进程结构化日志 |
+| `src/App.tsx` | 登录态、`Window` 类型声明、页面壳 |
+| `src/pages/routes.tsx` | **自定义路由**（非 react-router-dom 页面切换） |
+| `src/lib/i18n.tsx` | `useI18n()` + `t('key')`，locale：`zh-CN` / `en-US` |
+| `src/lib/theme.tsx` | `useTheme()`，CSS 变量明暗主题 |
+| `src/styles/globals.css` | Tailwind + Linear 风格 CSS 变量与组件类 |
+
+## 数据流
+
+1. 主进程 `BambooClient` 调 Bamboo API
+2. `poll:start` 轮询 → `new-deploys` 事件经 preload 转为 `CustomEvent`
+3. 渲染进程通过 `window.bamboo.*` / `window.config.*` 调用，**禁止**在 renderer 使用 Node API
+
+## 修改原则
+
+- 最小 diff，不重构无关代码
+- 新 IPC：同时在 `preload.ts`、`main.ts`（`ipcMain.handle`）、`App.tsx` 的 `Window` 接口三处对齐
+- 用户可见文案走 `t('...')`，中英键都加在 `i18n.tsx`

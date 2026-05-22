@@ -1,0 +1,72 @@
+---
+description: React 渲染进程、路由、i18n 与数据获取模式
+globs: src/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# React 渲染进程
+
+## 路由（自定义，非 URL Router）
+
+使用 `pages/routes.tsx` 的 `NavigationProvider`：
+
+```typescript
+import { useNavigate, useRoute } from './routes'
+
+navigate({ page: 'build', buildResultKey: key })
+navigate({ page: 'dashboard' })
+```
+
+页面在 `App.tsx` 的 `AppShell` 里按 `route.page` 条件渲染。
+
+## 访问主进程
+
+```typescript
+const projects = await window.bamboo.getProjects()
+await window.config.set('trackedProjects', keys)
+await window.poll.start(intervalSec, projectKeys)
+```
+
+监听推送事件：
+
+```typescript
+useEffect(() => {
+  const handler = (e: Event) => {
+    const { detail } = e as CustomEvent<DeployData[]>
+    setDeploys((prev) => [...detail, ...prev])
+  }
+  window.addEventListener('new-deploys', handler)
+  return () => window.removeEventListener('new-deploys', handler)
+}, [])
+```
+
+## i18n
+
+```typescript
+import { useI18n } from '../lib/i18n'
+const { t, locale, setLocale } = useI18n()
+// ✅ t('dashboard.title')
+// ❌ 硬编码用户可见中文/英文
+```
+
+新键同时维护 `zh-CN` 与 `en-US` 字典。
+
+## 数据组件三态
+
+每个拉取数据的页面/区块必须处理：
+
+1. **loading** — 使用 `LoadingSpinner` 或内联骨架
+2. **error** — 可读提示 + 可选重试
+3. **empty** — 引导文案（参考 `Dashboard` 无项目选中态）
+
+## 组件约定
+
+- 页面：`src/pages/*.tsx`，默认导出
+- 复用 UI：`src/components/`
+- 日志：`rendererLog` from `lib/renderer-logger.ts`
+- 错误边界：已由 `App.tsx` 包裹，子树抛错会记录 `SYSTEM` 日志
+
+## 禁止
+
+- 在 `src/` 直接 `import` Node/Electron 模块
+- 引入 `react-router-dom` 做页面切换（依赖已在 package.json，但当前架构用 Context 路由）
