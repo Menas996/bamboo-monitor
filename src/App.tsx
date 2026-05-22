@@ -19,12 +19,15 @@ declare global {
       login: (server: string, username: string, password: string) => Promise<boolean>
       getProjects: () => Promise<any[]>
       getDeployments: (projectKey: string) => Promise<any[]>
+      getDeploymentsPage: (projectKey: string, startIndex: number, pageSize: number) => Promise<{ deploys: any[]; hasMore: boolean }>
+      enrichDeployments: (projectKey: string, buildResultKeys: string[]) => Promise<any[]>
       getBuildLog: (buildResultKey: string) => Promise<string | null>
       getFullBuildLog: (buildResultKey: string) => Promise<string | null>
       getBuildDetail: (buildResultKey: string) => Promise<any>
       getPlanDetail: (planKey: string) => Promise<any>
       getPlanResults: (planKey: string) => Promise<any>
       getPlanResultsEnriched: (planKey: string) => Promise<any>
+      getPlanResultsHistoryPage: (planKey: string, startIndex: number, pageSize: number) => Promise<{ rows: any[]; hasMore: boolean }>
       getProjectPlans: (projectKey: string) => Promise<any[]>
     }
     config: {

@@ -9,6 +9,12 @@ contextBridge.exposeInMainWorld('bamboo', {
   getDeployments: (projectKey: string) =>
     ipcRenderer.invoke('bamboo:getDeployments', projectKey),
 
+  getDeploymentsPage: (projectKey: string, startIndex: number, pageSize: number) =>
+    ipcRenderer.invoke('bamboo:getDeploymentsPage', projectKey, startIndex, pageSize),
+
+  enrichDeployments: (projectKey: string, buildResultKeys: string[]) =>
+    ipcRenderer.invoke('bamboo:enrichDeployments', projectKey, buildResultKeys),
+
   getBuildLog: (buildResultKey: string) =>
     ipcRenderer.invoke('bamboo:getBuildLog', buildResultKey),
 
@@ -26,6 +32,9 @@ contextBridge.exposeInMainWorld('bamboo', {
 
   getPlanResultsEnriched: (planKey: string) =>
     ipcRenderer.invoke('bamboo:getPlanResultsEnriched', planKey),
+
+  getPlanResultsHistoryPage: (planKey: string, startIndex: number, pageSize: number) =>
+    ipcRenderer.invoke('bamboo:getPlanResultsHistoryPage', planKey, startIndex, pageSize),
 
   getProjectPlans: (projectKey: string) =>
     ipcRenderer.invoke('bamboo:getProjectPlans', projectKey),
