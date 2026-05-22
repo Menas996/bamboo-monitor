@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useI18n } from '../lib/i18n'
 import { useNavigate } from './routes'
 import DeployCard from '../components/DeployCard'
@@ -33,6 +33,32 @@ interface DeployData {
 }
 
 const PAGE_SIZE = 20
+const DEPLOY_FETCH_PAGE = 50
+
+function deployNeedsEnrich(d: DeployData): boolean {
+  const r = d.deploymentResult
+  if (!d.buildResultKey || !r) return false
+  return !(r.reason?.trim() || r.initiator?.name?.trim() || r.startedDate || r.finishedDate)
+}
+
+function mergeEnrichedDeploys(prev: DeployData[], patches: DeployData[]): DeployData[] {
+  if (!patches.length) return prev
+  const byKey = new Map(patches.map((p) => {
+    const planKey = p.plan?.key ?? p.environment.key
+    return [planKey, p]
+  }))
+  return prev.map((d) => {
+    const planKey = d.plan?.key ?? d.environment.key
+    const patch = byKey.get(planKey)
+    if (!patch) return d
+    return {
+      ...d,
+      ...patch,
+      deploymentResult: patch.deploymentResult ?? d.deploymentResult,
+      buildResultKey: patch.buildResultKey ?? d.buildResultKey,
+    }
+  })
+}
 
 function deployToFavorite(deploy: DeployData, projectKey: string): FavoritePlan | null {
   const planKey = deploy.plan?.key ?? deploy.environment.key
@@ -62,6 +88,10 @@ export default function Dashboard() {
   const [buildSearch, setBuildSearch] = useState('')
   const [openingFavoriteKey, setOpeningFavoriteKey] = useState<string | null>(null)
   const [planStatus, setPlanStatus] = useState<Record<string, PlanLiveStatus>>({})
+  const [deployHasMore, setDeployHasMore] = useState(false)
+  const [deployFetchOffset, setDeployFetchOffset] = useState(0)
+  const [deployLoadingMore, setDeployLoadingMore] = useState(false)
+  const enrichedKeysRef = useRef(new Set<string>())
 
   useEffect(() => {
     async function load() {
@@ -80,17 +110,58 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (!selectedProject) { setDeploys([]); setDeployLoading(false); return }
+    if (!selectedProject) {
+      setDeploys([])
+      setDeployLoading(false)
+      setDeployHasMore(false)
+      setDeployFetchOffset(0)
+      enrichedKeysRef.current.clear()
+      return
+    }
+    let cancelled = false
+    enrichedKeysRef.current.clear()
+
     async function load() {
       setDeploys([])
       setDeployLoading(true)
-      const results = await window.bamboo.getDeployments(selectedProject!)
-      setDeploys(dedupeDeploysByPlan(results ?? []))
-      setDeployPage(0)
-      setDeployLoading(false)
+      setDeployHasMore(false)
+      setDeployFetchOffset(0)
+      try {
+        const { deploys: page, hasMore } = await window.bamboo.getDeploymentsPage(
+          selectedProject!,
+          0,
+          DEPLOY_FETCH_PAGE
+        )
+        if (cancelled) return
+        setDeploys(dedupeDeploysByPlan(page ?? []))
+        setDeployHasMore(hasMore)
+        setDeployFetchOffset(DEPLOY_FETCH_PAGE)
+        setDeployPage(0)
+      } finally {
+        if (!cancelled) setDeployLoading(false)
+      }
     }
-    load()
+    void load()
+    return () => { cancelled = true }
   }, [selectedProject])
+
+  async function loadMoreDeploys() {
+    if (!selectedProject || deployLoadingMore || !deployHasMore) return
+    setDeployLoadingMore(true)
+    const startIndex = deployFetchOffset
+    try {
+      const { deploys: page, hasMore } = await window.bamboo.getDeploymentsPage(
+        selectedProject,
+        startIndex,
+        DEPLOY_FETCH_PAGE
+      )
+      setDeploys((prev) => dedupeDeploysByPlan([...prev, ...(page ?? [])]))
+      setDeployHasMore(hasMore)
+      setDeployFetchOffset(startIndex + DEPLOY_FETCH_PAGE)
+    } finally {
+      setDeployLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -227,6 +298,22 @@ export default function Dashboard() {
 
   const deployTotalPages = Math.ceil(filteredDeploys.length / PAGE_SIZE)
   const paginatedDeploys = filteredDeploys.slice(deployPage * PAGE_SIZE, (deployPage + 1) * PAGE_SIZE)
+
+  useEffect(() => {
+    if (!selectedProject || deployLoading || buildTab !== 'all') return
+    const keys = paginatedDeploys
+      .filter(deployNeedsEnrich)
+      .map((d) => d.buildResultKey!)
+      .filter((k) => !enrichedKeysRef.current.has(k))
+    if (!keys.length) return
+    keys.forEach((k) => enrichedKeysRef.current.add(k))
+    let cancelled = false
+    void window.bamboo.enrichDeployments(selectedProject, keys).then((patches) => {
+      if (cancelled || !patches?.length) return
+      setDeploys((prev) => mergeEnrichedDeploys(prev, patches))
+    })
+    return () => { cancelled = true }
+  }, [selectedProject, deployLoading, buildTab, deployPage, paginatedDeploys])
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = { all: deploys.length }
@@ -414,35 +501,55 @@ export default function Dashboard() {
                   })}
                 </div>
 
-                {deployTotalPages > 1 && (
+                {(deployTotalPages > 1 || deployHasMore) && (
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     gap: 8, marginTop: 16, fontSize: 12, color: 'var(--text-quaternary)',
+                    flexWrap: 'wrap',
                   }}>
-                    <button
-                      onClick={() => setDeployPage((p) => Math.max(0, p - 1))}
-                      disabled={deployPage === 0}
-                      style={{
-                        background: 'none', border: 'none', cursor: deployPage === 0 ? 'default' : 'pointer',
-                        color: deployPage === 0 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
-                        padding: 4, display: 'flex',
-                      }}
-                    >
-                      <ChevronLeft size={14} />
-                    </button>
-                    <span style={{ whiteSpace: 'nowrap' }}>{deployPage + 1} / {deployTotalPages}</span>
-                    <button
-                      onClick={() => setDeployPage((p) => Math.min(deployTotalPages - 1, p + 1))}
-                      disabled={deployPage >= deployTotalPages - 1}
-                      style={{
-                        background: 'none', border: 'none',
-                        cursor: deployPage >= deployTotalPages - 1 ? 'default' : 'pointer',
-                        color: deployPage >= deployTotalPages - 1 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
-                        padding: 4, display: 'flex',
-                      }}
-                    >
-                      <ChevronRight size={14} />
-                    </button>
+                    {deployTotalPages > 1 && (
+                      <>
+                        <button
+                          onClick={() => setDeployPage((p) => Math.max(0, p - 1))}
+                          disabled={deployPage === 0}
+                          style={{
+                            background: 'none', border: 'none', cursor: deployPage === 0 ? 'default' : 'pointer',
+                            color: deployPage === 0 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
+                            padding: 4, display: 'flex',
+                          }}
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span style={{ whiteSpace: 'nowrap' }}>{deployPage + 1} / {deployTotalPages}</span>
+                        <button
+                          onClick={() => setDeployPage((p) => Math.min(deployTotalPages - 1, p + 1))}
+                          disabled={deployPage >= deployTotalPages - 1}
+                          style={{
+                            background: 'none', border: 'none',
+                            cursor: deployPage >= deployTotalPages - 1 ? 'default' : 'pointer',
+                            color: deployPage >= deployTotalPages - 1 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
+                            padding: 4, display: 'flex',
+                          }}
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </>
+                    )}
+                    {deployHasMore && (
+                      <button
+                        type="button"
+                        onClick={() => void loadMoreDeploys()}
+                        disabled={deployLoadingMore}
+                        className="btn-ghost"
+                        style={{
+                          fontSize: 12, fontWeight: 510, padding: '6px 14px',
+                          opacity: deployLoadingMore ? 0.6 : 1,
+                          transition: 'opacity 0.15s ease',
+                        }}
+                      >
+                        {deployLoadingMore ? t('common.loading_more') : t('common.load_more')}
+                      </button>
+                    )}
                   </div>
                 )}
               </>

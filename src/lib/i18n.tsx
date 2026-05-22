@@ -45,6 +45,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.no_favorites': '暂无收藏',
     'dashboard.no_favorites.hint': '在「全部构建」中选择项目，在构建卡片上点击星标收藏',
     'dashboard.no_plans': '无子项目',
+    'common.load_more': '加载更多',
+    'common.loading_more': '加载中…',
 
     // Build detail
     'build.deploying': '部署进行中…',
@@ -161,6 +163,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.no_favorites': 'No favorites yet',
     'dashboard.no_favorites.hint': 'Under All Builds, select a project and star a build card',
     'dashboard.no_plans': 'No plans',
+    'common.load_more': 'Load more',
+    'common.loading_more': 'Loading…',
 
     'build.deploying': 'Deployment in progress…',
     'build.deploy_done': 'Deployment finished',
