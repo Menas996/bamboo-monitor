@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell } from 'electron'
 import path from 'path'
 import Store from 'electron-store'
-import { BambooClient, BambooDeployResult } from './bamboo-client'
-import { startPolling, stopPolling, type FavoritePlan } from './poller'
+import { BambooClient, BambooDeployResult, setGitRepositoryUrlMappings } from './bamboo-client'
+import { startPolling, stopPolling, type FavoritePlan, type PollingOptions } from './poller'
 import { setupTray } from './tray'
 import { getAppIcon, setDockIcon } from './app-icon'
 import { logger } from './lib/logger'
@@ -15,6 +15,8 @@ const store = new Store<{
   trackedProjects: string[]
   favoritePlans: FavoritePlan[]
   lastSeen: Record<string, number>
+  autoDeployOnGitChange: boolean
+  gitRepositoryUrls: Record<string, string>
 }>()
 
 const gotTheLock = app.requestSingleInstanceLock()
@@ -151,6 +153,37 @@ if (!gotTheLock) {
     }
   }
 
+  function buildPollingOptions(): PollingOptions | undefined {
+    const username = store.get('username')
+    const password = store.get('password')
+    const autoDeploy = store.get('autoDeployOnGitChange', true)
+    if (!username || !password || !autoDeploy) {
+      return undefined
+    }
+    return {
+      autoDeployOnGitChange: true,
+      auth: { username, password },
+      onAutoDeploy: ({ fav, status, queue }) => {
+        const shortRev = status.remoteRevision?.slice(0, 8) ?? ''
+        const title = queue.success
+          ? `自动部署 · ${fav.planName}`
+          : `自动部署失败 · ${fav.planName}`
+        const body = queue.success
+          ? `检测到新提交 (${shortRev})，已触发 Bamboo 构建`
+          : (queue.errorMessage
+            ? `无法将构建加入队列：${queue.errorMessage}`
+            : '无法将构建加入队列，请检查 Bamboo 计划构建权限')
+        sendNotification(title, body)
+        mainWindow?.webContents.send('git-auto-deploy', { fav, status, queue })
+        logger.info('GIT', `Auto deploy ${queue.success ? 'ok' : 'fail'} for ${fav.planKey}`, {
+          remote: status.remoteRevision,
+          statusCode: queue.statusCode,
+          error: queue.errorMessage,
+        })
+      },
+    }
+  }
+
   function startMonitoring() {
     const server = store.get('server')
     const username = store.get('username')
@@ -161,12 +194,14 @@ if (!gotTheLock) {
       const interval = store.get('pollInterval', 30)
       const favorites = store.get('favoritePlans', [])
 
-      logger.info('POLL', `Starting poller: ${favorites.length} favorite plans, ${interval}s interval`)
+      logger.info('POLL', `Starting poller: ${favorites.length} favorite plans, ${interval}s interval`, {
+        autoDeploy: store.get('autoDeployOnGitChange', true),
+      })
 
       startPolling(bamboo, favorites, interval, async (newDeploys) => {
         await notifyNewDeploys(bamboo!, newDeploys)
         mainWindow?.webContents.send('new-deploys', newDeploys)
-      })
+      }, buildPollingOptions())
     }
   }
 
@@ -364,6 +399,9 @@ if (!gotTheLock) {
     ipcMain.handle('config:set', async (_e, key: string, value: unknown) => {
       logger.operation('config-set', { key })
       store.set(key as any, value)
+      if (key === 'gitRepositoryUrls' && value && typeof value === 'object') {
+        setGitRepositoryUrlMappings(value as Record<string, string>)
+      }
     })
 
     ipcMain.handle('poll:start', async (_e, interval: number, favoritePlans: FavoritePlan[]) => {
@@ -374,7 +412,7 @@ if (!gotTheLock) {
       startPolling(bamboo, favoritePlans, interval, async (newDeploys) => {
         await notifyNewDeploys(bamboo!, newDeploys)
         mainWindow?.webContents.send('new-deploys', newDeploys)
-      })
+      }, buildPollingOptions())
     })
 
     ipcMain.handle('poll:stop', async () => {
@@ -527,6 +565,10 @@ if (!gotTheLock) {
     })
 
     setDockIcon()
+    const gitUrls = store.get('gitRepositoryUrls', {}) as Record<string, string>
+    if (gitUrls && typeof gitUrls === 'object' && Object.keys(gitUrls).length > 0) {
+      setGitRepositoryUrlMappings(gitUrls)
+    }
     createWindow()
 
     if (mainWindow && !isDev) {

@@ -1,4 +1,39 @@
 import { logger } from './lib/logger'
+import {
+  extractGitUrlsFromJson, findGitUrlInValue, findRevisionHashInJson, pickGitBranch,
+  pickPreferredVcsBranch,
+} from './git-remote'
+import Store from 'electron-store'
+
+const planRepoCache = new Store<{
+  planGitRepos: Record<string, { url: string; branch: string }>
+  gitRepositoryUrls: Record<string, string>
+}>({
+  defaults: { planGitRepos: {}, gitRepositoryUrls: {} },
+})
+
+export function getGitRepositoryUrlMapping(key: string): string | undefined {
+  const map = planRepoCache.get('gitRepositoryUrls', {})
+  const k = key.trim()
+  return map[k] || map[k.toLowerCase()]
+}
+
+export function setGitRepositoryUrlMappings(map: Record<string, string>): void {
+  planRepoCache.set('gitRepositoryUrls', map)
+}
+
+function projectKeyFromPlanKey(planKey: string): string {
+  const idx = planKey.indexOf('-')
+  return idx > 0 ? planKey.slice(0, idx) : planKey
+}
+
+export interface FavoritePlan {
+  planKey: string
+  projectKey: string
+  planName: string
+  repositoryUrl?: string
+  repositoryBranch?: string
+}
 
 // --- Types matching your Bamboo 6.10.4 server responses ---
 
@@ -63,6 +98,10 @@ interface BambooQueueResponse {
 export interface QueueBuildResult {
   success: boolean
   buildResultKey?: string
+  statusCode?: number
+  errorMessage?: string
+  /** 已有构建在跑或并发上限，非权限/配置错误 */
+  benignSkip?: boolean
 }
 
 function coerceBuildResults(
@@ -751,6 +790,291 @@ export class BambooClient {
     return coerceBuildResults(data.results?.result)
   }
 
+  async getBuildVcsRevision(buildResultKey: string): Promise<string | null> {
+    try {
+      const data = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/result/${buildResultKey}?expand=vcsRevisions`
+      )
+      const direct = data.vcsRevisionKey
+      if (typeof direct === 'string' && direct.trim()) return direct.trim()
+
+      const vrs = data.vcsRevisions as { vcsRevision?: unknown } | undefined
+      const list = vrs?.vcsRevision
+      const revisions = list == null ? [] : Array.isArray(list) ? list : [list]
+      for (const v of revisions) {
+        const key = (v as Record<string, unknown>)?.vcsRevisionKey
+        if (typeof key === 'string' && key.trim()) return key.trim()
+      }
+      return null
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.warn('API', `getBuildVcsRevision(${buildResultKey}): ${msg}`)
+      return null
+    }
+  }
+
+  async getRepositoryFromBuild(
+    buildResultKey: string
+  ): Promise<{ url: string; branch: string } | null> {
+    try {
+      const data = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/result/${buildResultKey}?expand=vcsRevisions`
+      )
+      const vrs = data.vcsRevisions as { vcsRevision?: unknown } | undefined
+      const list = vrs?.vcsRevision
+      const revisions = list == null ? [] : Array.isArray(list) ? list : [list]
+      for (const v of revisions) {
+        const rec = v as Record<string, unknown>
+        const url = findGitUrlInValue(rec)
+        if (!url) continue
+        const branch = pickGitBranch(
+          rec.branch as string,
+          rec.vcsBranch as string,
+          (rec.repository as Record<string, unknown>)?.branch as string
+        )
+        return { url, branch }
+      }
+      const topUrl = findGitUrlInValue(data)
+      if (topUrl) return { url: topUrl, branch: 'main' }
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  async getPlanVcsBranches(planKey: string): Promise<string[]> {
+    try {
+      const data = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/plan/${planKey}/vcsBranches`
+      )
+      const container = data.branches as { branch?: unknown } | undefined
+      const raw = container?.branch ?? data.vcsBranch ?? data.branch
+      if (Array.isArray(raw)) {
+        return raw
+          .map((b) => (typeof b === 'string' ? b : (b as { name?: string })?.name))
+          .filter((n): n is string => !!n && typeof n === 'string')
+      }
+      if (raw && typeof raw === 'object' && 'name' in (raw as object)) {
+        const name = (raw as { name?: string }).name
+        if (name) return [name]
+      }
+      const single = data.branch ?? data.name
+      if (typeof single === 'string' && single) return [single]
+      return []
+    } catch {
+      return []
+    }
+  }
+
+  private cachePlanRepo(planKey: string, repo: { url: string; branch: string }): { url: string; branch: string } {
+    planRepoCache.set('planGitRepos', {
+      ...planRepoCache.get('planGitRepos', {}),
+      [planKey]: repo,
+    })
+    return repo
+  }
+
+  async getVcsMetaFromLatestBuild(
+    planKey: string
+  ): Promise<{ repositoryName?: string; repositoryId?: number; branch?: string; revision?: string } | null> {
+    try {
+      const results = await this.getPlanBuildResults(planKey, 15, true)
+      const sorted = [...results].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
+      for (const r of sorted) {
+        if (!r.buildResultKey) continue
+        const data = await this.request<Record<string, unknown>>(
+          `/rest/api/latest/result/${r.buildResultKey}?expand=vcsRevisions`
+        )
+        const vrs = data.vcsRevisions as { vcsRevision?: unknown } | undefined
+        const list = vrs?.vcsRevision
+        const revisions = list == null ? [] : Array.isArray(list) ? list : [list]
+        const first = revisions[0] as Record<string, unknown> | undefined
+        const revision = await this.getBuildVcsRevision(r.buildResultKey)
+        if (first || revision) {
+          return {
+            repositoryName: first?.repositoryName as string | undefined,
+            repositoryId: typeof first?.repositoryId === 'number' ? first.repositoryId : undefined,
+            branch: pickGitBranch(
+              first?.branch as string,
+              first?.vcsBranch as string,
+              ...(await this.getPlanVcsBranches(planKey))
+            ),
+            revision: revision ?? undefined,
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    return null
+  }
+
+  async getPlanDetectedVcsRevision(planKey: string): Promise<string | null> {
+    try {
+      const results = await this.getPlanBuildResults(planKey, 30, true)
+      const sorted = [...results].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
+      const latestFinished = sorted.find((r) => {
+        const life = (r.lifeCycleState ?? '').toUpperCase()
+        return life === 'FINISHED'
+      })
+      const finishedBn = latestFinished?.buildNumber ?? 0
+
+      for (const r of sorted) {
+        const bn = r.buildNumber ?? 0
+        if (bn <= finishedBn || !r.buildResultKey) continue
+        const life = (r.lifeCycleState ?? '').toUpperCase()
+        if (life === 'NOTBUILT') continue
+        const rev = await this.getBuildVcsRevision(r.buildResultKey)
+        if (rev) return rev
+      }
+    } catch {
+      /* ignore */
+    }
+
+    const paths = [
+      `/rest/api/latest/plan/${planKey}?expand=branches,planVcsBranches,vcsRevisions,repository`,
+      `/rest/api/latest/plan/${planKey}`,
+    ]
+    for (const path of paths) {
+      try {
+        const data = await this.request<Record<string, unknown>>(path)
+        const rev = findRevisionHashInJson(data)
+        if (rev) return rev
+      } catch {
+        /* try next */
+      }
+    }
+    return null
+  }
+
+  async listLinkedRepositoryDetails(): Promise<Array<{ id: string; name: string; detail: Record<string, unknown> | null }>> {
+    try {
+      const data = await this.request<Record<string, unknown>>('/rest/api/latest/repository?max-result=50')
+      const raw = data.searchResults ?? data.repositories ?? data.repository
+      const items = raw == null ? [] : Array.isArray(raw) ? raw : [raw]
+      const out: Array<{ id: string; name: string; detail: Record<string, unknown> | null }> = []
+      for (const item of items) {
+        const rec = item as Record<string, unknown>
+        const id = rec.id != null ? String(rec.id) : ''
+        if (!id) continue
+        const name = String(rec.name ?? '')
+        const detail = await this.request<Record<string, unknown>>(
+          `/rest/api/latest/repository/${id}`
+        ).catch(() => null)
+        out.push({ id, name, detail })
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+
+  async resolvePlanRepository(
+    fav: FavoritePlan,
+    _auth: { username: string; password: string }
+  ): Promise<{ url: string; branch: string } | null> {
+    const vcsBranchList = await this.getPlanVcsBranches(fav.planKey)
+    const vcsBranches = [
+      pickPreferredVcsBranch(vcsBranchList) ?? '',
+      ...vcsBranchList,
+    ].filter(Boolean)
+    const cached = planRepoCache.get('planGitRepos', {})[fav.planKey]
+    if (cached?.url) {
+      return {
+        url: cached.url,
+        branch: pickGitBranch(fav.repositoryBranch, cached.branch, ...vcsBranches),
+      }
+    }
+
+    if (fav.repositoryUrl?.trim()) {
+      return this.cachePlanRepo(fav.planKey, {
+        url: fav.repositoryUrl.trim(),
+        branch: pickGitBranch(fav.repositoryBranch, ...vcsBranches),
+      })
+    }
+
+    const vcsMeta = await this.getVcsMetaFromLatestBuild(fav.planKey)
+    const mappedUrl =
+      (vcsMeta?.repositoryName ? getGitRepositoryUrlMapping(vcsMeta.repositoryName) : undefined)
+      ?? getGitRepositoryUrlMapping(fav.planKey)
+    if (mappedUrl?.trim()) {
+      return this.cachePlanRepo(fav.planKey, {
+        url: mappedUrl.trim(),
+        branch: pickGitBranch(fav.repositoryBranch, vcsMeta?.branch, ...vcsBranches),
+      })
+    }
+
+    const tryUrl = (url: string, branchHint?: string) => {
+      if (!url) return null
+      return this.cachePlanRepo(fav.planKey, {
+        url,
+        branch: pickGitBranch(fav.repositoryBranch, branchHint, ...vcsBranches),
+      })
+    }
+
+    try {
+      const results = await this.getPlanResults(fav.planKey)
+      const sorted = [...results].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
+      for (const r of sorted) {
+        if (!r.buildResultKey) continue
+        const fromBuild = await this.getRepositoryFromBuild(r.buildResultKey)
+        if (fromBuild) return tryUrl(fromBuild.url, fromBuild.branch)
+        const detail = await this.request<Record<string, unknown>>(
+          `/rest/api/latest/result/${r.buildResultKey}?expand=vcsRevisions,plan,changes`
+        ).catch(() => null)
+        const urls = detail ? extractGitUrlsFromJson(detail) : []
+        if (urls[0]) return tryUrl(urls[0])
+      }
+    } catch {
+      /* ignore */
+    }
+
+    try {
+      const plan = await this.getPlanDetail(fav.planKey)
+      for (const url of extractGitUrlsFromJson(plan)) return tryUrl(url)
+      const url = findGitUrlInValue(plan)
+      if (url) return tryUrl(url)
+    } catch {
+      /* ignore */
+    }
+
+    const projectKey = fav.projectKey || projectKeyFromPlanKey(fav.planKey)
+    try {
+      const data = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/project/${projectKey}/repository/search?searchTerm=${encodeURIComponent(fav.planName)}`
+      )
+      for (const url of extractGitUrlsFromJson(data)) return tryUrl(url)
+    } catch {
+      /* ignore */
+    }
+
+    const repos = await this.listLinkedRepositoryDetails()
+    const planLower = fav.planKey.toLowerCase()
+    for (const { name, detail } of repos) {
+      if (!detail) continue
+      const nameLower = name.toLowerCase()
+      const nameMatch = nameLower && (planLower.includes(nameLower) || nameLower.includes(planLower.split('-').pop() ?? ''))
+      for (const url of extractGitUrlsFromJson(detail)) {
+        if (nameMatch || repos.length === 1) return tryUrl(url)
+      }
+    }
+    if (repos.length === 1 && repos[0].detail) {
+      const urls = extractGitUrlsFromJson(repos[0].detail)
+      if (urls[0]) return tryUrl(urls[0])
+    }
+
+    try {
+      const data = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/repository?searchTerm=${encodeURIComponent(fav.planName)}`
+      )
+      for (const url of extractGitUrlsFromJson(data)) return tryUrl(url)
+    } catch {
+      /* ignore */
+    }
+
+    return null
+  }
+
   // --- Build Action Methods ---
 
   async queueBuild(planKey: string, variables?: Record<string, string>): Promise<QueueBuildResult> {
@@ -774,23 +1098,37 @@ export class BambooClient {
         },
       })
 
+      const rawBody = await res.text()
+      let body: { buildResultKey?: string; key?: string; message?: string } | null = null
+      try {
+        body = rawBody ? JSON.parse(rawBody) as typeof body : null
+      } catch {
+        /* non-json */
+      }
+
       let buildResultKey: string | undefined
       const location = res.headers.get('Location') ?? res.headers.get('location')
       if (location) {
         const m = location.match(/\/result\/([^/?#]+)/i)
         if (m?.[1]) buildResultKey = decodeURIComponent(m[1])
       }
-      if (!buildResultKey && res.ok) {
-        try {
-          const body = await res.json() as { buildResultKey?: string; key?: string }
-          buildResultKey = body.buildResultKey ?? body.key
-        } catch {
-          /* empty body */
-        }
+      if (!buildResultKey && body) {
+        buildResultKey = body.buildResultKey ?? body.key
       }
 
-      logger.info('API', `queueBuild(${planKey}): ${res.status}`, { buildResultKey })
-      return { success: res.ok, buildResultKey }
+      const errorMessage = body?.message ?? (rawBody.trim() || undefined)
+      const benignSkip = !res.ok && !!errorMessage && (
+        /concurrent builds|maximum number of concurrent|already building|build is already|queue.*full/i.test(errorMessage)
+      )
+
+      logger.info('API', `queueBuild(${planKey}): ${res.status}`, { buildResultKey, benignSkip })
+      return {
+        success: res.ok,
+        buildResultKey,
+        statusCode: res.status,
+        errorMessage,
+        benignSkip,
+      }
     } catch (err: any) {
       logger.error('API', `queueBuild failed: ${err.message}`)
       return { success: false }

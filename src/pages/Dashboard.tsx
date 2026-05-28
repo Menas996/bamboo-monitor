@@ -88,6 +88,7 @@ export default function Dashboard() {
   const [buildSearch, setBuildSearch] = useState('')
   const [openingFavoriteKey, setOpeningFavoriteKey] = useState<string | null>(null)
   const [planStatus, setPlanStatus] = useState<Record<string, PlanLiveStatus>>({})
+  const [gitDeployFlash, setGitDeployFlash] = useState<Record<string, number>>({})
   const [deployHasMore, setDeployHasMore] = useState(false)
   const [deployFetchOffset, setDeployFetchOffset] = useState(0)
   const [deployLoadingMore, setDeployLoadingMore] = useState(false)
@@ -170,6 +171,24 @@ export default function Dashboard() {
     }
     window.addEventListener('new-deploys', handler)
     return () => window.removeEventListener('new-deploys', handler)
+  }, [])
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { fav, queue } = (e as CustomEvent).detail ?? {}
+      if (!fav?.planKey || !queue?.success) return
+      setGitDeployFlash((prev) => ({ ...prev, [fav.planKey]: Date.now() }))
+      const key = fav.planKey as string
+      setTimeout(() => {
+        setGitDeployFlash((prev) => {
+          const next = { ...prev }
+          delete next[key]
+          return next
+        })
+      }, 4000)
+    }
+    window.addEventListener('git-auto-deploy', handler)
+    return () => window.removeEventListener('git-auto-deploy', handler)
   }, [])
 
   useEffect(() => {
@@ -425,6 +444,7 @@ export default function Dashboard() {
           <FavoritePlanList
             favorites={favorites}
             planStatus={planStatus}
+            gitDeployFlash={gitDeployFlash}
             onToggleFavorite={toggleFavorite}
             onOpenFavorite={openFavoriteDetail}
             openingPlanKey={openingFavoriteKey}

@@ -92,6 +92,10 @@ ipcRenderer.on('new-deploys', (_event, deploys) => {
   window.dispatchEvent(new CustomEvent('new-deploys', { detail: deploys }))
 })
 
+ipcRenderer.on('git-auto-deploy', (_event, payload) => {
+  window.dispatchEvent(new CustomEvent('git-auto-deploy', { detail: payload }))
+})
+
 ipcRenderer.on('navigate-to-deploy', (_event, deploy) => {
   window.dispatchEvent(new CustomEvent('navigate-to-deploy', { detail: deploy }))
 })

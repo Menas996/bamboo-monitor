@@ -1,13 +1,11 @@
 import {
   BambooClient, BambooDeployResult, BambooBuildResult, pickLatestPlanBuild, buildResultToDeploy,
+  type FavoritePlan,
 } from './bamboo-client'
 import Store from 'electron-store'
+import { runGitWatchForFavorites, type PlanGitWatchResult } from './plan-git-watch'
 
-export interface FavoritePlan {
-  planKey: string
-  projectKey: string
-  planName: string
-}
+export type { FavoritePlan }
 
 interface PlanSnapshot {
   buildNumber: number
@@ -21,6 +19,8 @@ const store = new Store<{
 }>()
 
 let pollingTimer: ReturnType<typeof setInterval> | null = null
+let pollCycleInFlight = false
+let gitWatchInFlight: Promise<void> | null = null
 
 function isTerminalState(state: string): boolean {
   const s = state.toUpperCase()
@@ -40,11 +40,22 @@ function toDeployResult(
   }
 }
 
+export interface PollingOptions {
+  autoDeployOnGitChange?: boolean
+  auth?: { username: string; password: string }
+  onAutoDeploy?: (payload: {
+    fav: FavoritePlan
+    status: PlanGitWatchResult
+    queue: { success: boolean; buildResultKey?: string }
+  }) => void
+}
+
 export function startPolling(
   client: BambooClient,
   favoritePlans: FavoritePlan[],
   intervalSec: number,
-  onNewDeploys: (deploys: BambooDeployResult[]) => void
+  onNewDeploys: (deploys: BambooDeployResult[]) => void,
+  options?: PollingOptions
 ) {
   stopPolling()
 
@@ -54,7 +65,10 @@ export function startPolling(
 
   async function poll() {
     if (favoritePlans.length === 0) return
+    if (pollCycleInFlight) return
+    pollCycleInFlight = true
 
+    const wasFirstPoll = firstPoll
     const newDeploys: BambooDeployResult[] = []
 
     for (const fav of favoritePlans) {
@@ -69,7 +83,7 @@ export function startPolling(
         const life = latest.lifeCycleState ?? ''
         const prev = lastSnapshot[planKey]
 
-        if (!firstPoll) {
+        if (!wasFirstPoll) {
           const prevBuild = prev?.buildNumber ?? lastSeen[planKey] ?? 0
           const prevState = prev?.buildState ?? ''
           const newBuild = buildId > prevBuild
@@ -104,6 +118,21 @@ export function startPolling(
     } else {
       store.set('lastSnapshot', lastSnapshot)
       store.set('lastSeen', lastSeen)
+    }
+
+    const runGitWatch = !wasFirstPoll && !!options?.autoDeployOnGitChange && !!options.auth && favoritePlans.length > 0
+    try {
+      if (runGitWatch) {
+        const run = () => runGitWatchForFavorites(client, favoritePlans, options!.auth!, (fav, status, queue) => {
+          options!.onAutoDeploy?.({ fav, status, queue })
+        })
+        gitWatchInFlight = (gitWatchInFlight ?? Promise.resolve()).then(run).finally(() => {
+          gitWatchInFlight = null
+        })
+        await gitWatchInFlight
+      }
+    } finally {
+      pollCycleInFlight = false
     }
   }
 

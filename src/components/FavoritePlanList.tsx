@@ -20,6 +20,7 @@ export interface PlanLiveStatus {
 interface Props {
   favorites: FavoritePlan[]
   planStatus: Record<string, PlanLiveStatus>
+  gitDeployFlash?: Record<string, number>
   onToggleFavorite: (plan: FavoritePlan) => void
   onOpenFavorite: (plan: FavoritePlan) => void
   openingPlanKey?: string | null
@@ -35,6 +36,7 @@ const nowrapText: CSSProperties = {
 export default function FavoritePlanList({
   favorites,
   planStatus,
+  gitDeployFlash = {},
   onToggleFavorite,
   onOpenFavorite,
   openingPlanKey,
@@ -57,6 +59,7 @@ export default function FavoritePlanList({
         const opening = openingPlanKey === fav.planKey
         const live = planStatus[fav.planKey]
         const isRunning = live?.isRunning
+        const gitTriggered = !!gitDeployFlash[fav.planKey]
         return (
           <div
             key={fav.planKey}
@@ -93,6 +96,16 @@ export default function FavoritePlanList({
                     animation: 'pulse 1.5s ease-in-out infinite',
                   }}>
                     {t('status.in_progress')}
+                  </span>
+                )}
+                {gitTriggered && !isRunning && (
+                  <span style={{
+                    flexShrink: 0, fontSize: 10, fontWeight: 510, color: 'var(--success)',
+                    padding: '1px 6px', borderRadius: 'var(--radius-pill)',
+                    background: 'rgba(39, 166, 68, 0.15)',
+                    transition: 'opacity 0.2s ease',
+                  }}>
+                    {t('dashboard.git_auto_deployed')}
                   </span>
                 )}
               </div>
