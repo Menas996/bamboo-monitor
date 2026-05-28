@@ -86,7 +86,7 @@ export default function Logs() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 16, flexShrink: 0,
+        marginBottom: 16, flexShrink: 0, gap: 12, minWidth: 0, flexWrap: 'wrap',
       }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 510, color: 'var(--text-primary)', letterSpacing: '-0.24px' }}>
@@ -120,8 +120,8 @@ export default function Logs() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexShrink: 0 }}>
-        <div style={{ position: 'relative', width: 280 }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexShrink: 0, flexWrap: 'wrap' }}>
+        <div style={{ position: 'relative', flex: '1 1 200px', minWidth: 0 }}>
           <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-quaternary)' }} />
           <input className="input-linear" placeholder={t('logs.search')}
             value={search} onChange={(e) => setSearch(e.target.value)}

@@ -13,8 +13,9 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import {
   ArrowLeft, GitCommit, Clock, User, Layers, AlertTriangle,
   FileText, Box, List, MoreVertical, RefreshCw, Play, Trash2,
-  Bug, ToggleLeft, Star, Settings, Tag, Check, X, ExternalLink,
+  Bug, ToggleLeft, Star, Settings, Tag, Check, X, ExternalLink, GitBranch,
 } from 'lucide-react'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
 const DETAIL_POLL_MS_RUNNING = 5000
 const LIVE_DETAIL_TABS = new Set(['summary', 'stages', 'tests'])
@@ -787,6 +788,15 @@ function BuildDeployProgress({ detail }: { detail: BuildDetailData }) {
 }
 
 function SummaryTab({ detail }: { detail: BuildDetailData }) {
+  const { t } = useI18n()
+  const vcsList = asArray(detail.vcsRevisions?.vcsRevision)
+  const revision = vcsList[0]?.vcsRevisionKey?.slice(0, 12) ?? '-'
+  const branch = vcsList[0]?.branch ?? vcsList[0]?.vcsBranch ?? ''
+  const totalTests = (detail.successfulTestCount ?? 0) + (detail.failedTestCount ?? 0) + (detail.skippedTestCount ?? 0)
+  const testSummary = totalTests > 0
+    ? `${detail.successfulTestCount ?? 0} / ${totalTests} (${Math.round(((detail.successfulTestCount ?? 0) / totalTests) * 100)}%)`
+    : '-'
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
       <InfoCard icon={User} label="Triggered By" value={extractText(detail.buildReason)} />
@@ -795,6 +805,10 @@ function SummaryTab({ detail }: { detail: BuildDetailData }) {
       <InfoCard icon={Clock} label="Duration" value={formatDuration(detail.buildDuration)} />
       <InfoCard icon={Layers} label="Lifecycle" value={detail.lifeCycleState} />
       <InfoCard icon={Box} label="Build" value={`#${detail.buildNumber}`} />
+      <InfoCard icon={Tag} label={t('build.plan_key')} value={detail.plan?.key ?? '-'} />
+      <InfoCard icon={GitCommit} label={t('build.revision')} value={revision} />
+      {branch && <InfoCard icon={GitCommit} label={t('build.branch')} value={branch} />}
+      {totalTests > 0 && <InfoCard icon={Bug} label={t('build.test_pass_rate')} value={testSummary} />}
       {detail.plan?.description && (
         <div style={{ gridColumn: '1 / -1' }}>
           <InfoCard icon={FileText} label="Description" value={detail.plan.description} />
@@ -805,24 +819,71 @@ function SummaryTab({ detail }: { detail: BuildDetailData }) {
 }
 
 function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildResultKey: string; isFailed: boolean }) {
+  const { t } = useI18n()
+  const [expandedStage, setExpandedStage] = useState<number | null>(null)
+
+  function getJobs(stage: any): any[] {
+    const jobs = stage.jobs?.job ?? stage.results?.result ?? []
+    return asArray(jobs)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {stages.map((s, i) => (
-        <div key={i} className="card-surface" style={{ padding: '14px 18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{
-              width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)', color: 'white',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 510, flexShrink: 0,
-            }}>
-              {i + 1}
-            </span>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }}>{s.name}</div>
+      {stages.map((s, i) => {
+        const jobs = getJobs(s)
+        const isExpanded = expandedStage === i
+        return (
+          <div key={i} className="card-surface" style={{ padding: '14px 18px', overflow: 'hidden' }}>
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: jobs.length ? 'pointer' : 'default' }}
+              onClick={() => { if (jobs.length) setExpandedStage(isExpanded ? null : i) }}
+            >
+              <span style={{
+                width: 28, height: 28, borderRadius: '50%', background: 'var(--bg-page)', color: 'var(--text-primary)',
+                boxShadow: 'var(--ring-border)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 510, flexShrink: 0,
+              }}>
+                {i + 1}
+              </span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }}>{s.name}</div>
+                {jobs.length > 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 2 }}>
+                    {jobs.length} job{jobs.length !== 1 ? 's' : ''}
+                  </div>
+                )}
+              </div>
+              {s.state && <StatusBadge status={s.state} />}
+              {jobs.length > 0 && (
+                <span style={{ fontSize: 11, color: 'var(--text-quaternary)', transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+              )}
             </div>
-            {s.state && <StatusBadge status={s.state} />}
+            {isExpanded && jobs.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: 4, fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', padding: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                  <span>{t('build.job_name')}</span>
+                  <span>Status</span>
+                  <span style={{ textAlign: 'right' }}>{t('build.job_duration')}</span>
+                </div>
+                {jobs.map((job: any, j: number) => {
+                  const duration = job.buildDurationInSeconds ?? (job.buildDuration ? Math.round(job.buildDuration / 1000) : undefined)
+                  return (
+                    <div key={j} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: 4, padding: '5px 0', borderTop: j > 0 ? '1px solid var(--border-subtle)' : 'none', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.name}>
+                        {job.name ?? `Job ${j + 1}`}
+                      </span>
+                      <StatusBadge status={job.state ?? job.lifeCycleState ?? 'Unknown'} />
+                      <span style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right', fontFamily: 'monospace' }}>
+                        {duration != null ? (duration > 60 ? `${Math.floor(duration / 60)}m${duration % 60}s` : `${duration}s`) : '-'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        )
+      })}
       {isFailed && (
         <div>
           <div style={{ fontSize: 11, fontWeight: 510, color: 'var(--error)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -843,14 +904,19 @@ function ChangesTab({ changes, vcs }: { changes: NormalizedChange[]; vcs: any[] 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {vcsList.length > 0 && (
         <div>
-          <SectionTitle><GitCommit size={12} /> Git Repositories</SectionTitle>
+          <SectionTitle><GitCommit size={12} /> Git Repositories ({vcsList.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {vcsList.map((v, i) => (
-              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 13, fontWeight: 510, color: 'var(--accent)' }}>{v.repositoryName}</span>
+              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 510, color: 'var(--accent)' }}>{v.repositoryName ?? 'Repository'}</span>
                 <code style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace', background: 'var(--bg-page)', padding: '2px 8px', borderRadius: 3 }}>
-                  {v.vcsRevisionKey?.slice(0, 12)}
+                  {v.vcsRevisionKey?.slice(0, 12) ?? '-'}
                 </code>
+                {(v.branch ?? v.vcsBranch) && (
+                  <span style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <GitBranch size={10} /> {v.branch ?? v.vcsBranch}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -858,26 +924,33 @@ function ChangesTab({ changes, vcs }: { changes: NormalizedChange[]; vcs: any[] 
       )}
       {changes.length > 0 && (
         <div>
-          <SectionTitle><GitCommit size={12} /> Commits</SectionTitle>
+          <SectionTitle><GitCommit size={12} /> Commits ({changes.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {changes.map((c, i) => (
-              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', gap: 12, alignItems: 'center' }}>
-                <span style={{
-                  fontSize: 12, fontWeight: 510, color: 'var(--accent)', minWidth: 120,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {c.author ?? 'unknown'}
-                </span>
-                <span style={{
-                  fontSize: 13, color: 'var(--text-secondary)', flex: 1,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }} title={c.message}>
-                  {c.message || t('build.no_commit_message')}
-                </span>
-                {c.vcsRevisionKey && (
-                  <code style={{ fontSize: 10, color: 'var(--text-quaternary)', fontFamily: 'monospace', background: 'var(--bg-page)', padding: '1px 6px', borderRadius: 2, flexShrink: 0 }}>
-                    {c.vcsRevisionKey.slice(0, 8)}
-                  </code>
+              <div key={i} className="card-surface" style={{ padding: '10px 14px', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <span style={{
+                    fontSize: 12, fontWeight: 510, color: 'var(--accent)', minWidth: 120, flexShrink: 0,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {c.author ?? 'unknown'}
+                  </span>
+                  <span style={{
+                    fontSize: 13, color: 'var(--text-secondary)', flex: 1, minWidth: 0,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }} title={c.message}>
+                    {c.message || t('build.no_commit_message')}
+                  </span>
+                  {c.vcsRevisionKey && (
+                    <code style={{ fontSize: 10, color: 'var(--text-quaternary)', fontFamily: 'monospace', background: 'var(--bg-page)', padding: '1px 6px', borderRadius: 2, flexShrink: 0 }}>
+                      {c.vcsRevisionKey.slice(0, 8)}
+                    </code>
+                  )}
+                </div>
+                {c.repositoryName && (
+                  <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 4 }}>
+                    {c.repositoryName}
+                  </div>
                 )}
               </div>
             ))}
@@ -896,15 +969,30 @@ function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {jiraIssues.length > 0 && (
         <div>
-          <SectionTitle><ExternalLink size={12} /> Jira Issues</SectionTitle>
+          <SectionTitle><ExternalLink size={12} /> Jira Issues ({jiraIssues.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {jiraIssues.map((issue: any, i: number) => (
               <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', gap: 12, alignItems: 'center' }}>
                 <span style={{ fontSize: 12, fontWeight: 510, color: 'var(--accent)', minWidth: 140 }}>{issue.key}</span>
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1 }}>{issue.summary}</span>
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={issue.summary}>
+                  {issue.summary}
+                </span>
+                {issue.issueStatus?.name && (
+                  <span style={{
+                    fontSize: 11, fontWeight: 500, padding: '2px 8px', borderRadius: 'var(--radius-pill)',
+                    background: issue.issueStatus.name === 'Done' ? 'rgba(39,166,68,0.15)' : 'rgba(94,106,210,0.12)',
+                    color: issue.issueStatus.name === 'Done' ? 'var(--success)' : 'var(--text-secondary)',
+                    flexShrink: 0,
+                  }}>
+                    {issue.issueStatus.name}
+                  </span>
+                )}
                 {issue.url && (
-                  <a href={issue.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: 'var(--text-quaternary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <ExternalLink size={10} /> Open
+                  <a href={issue.url} target="_blank" rel="noopener noreferrer" style={{
+                    fontSize: 11, color: 'var(--text-quaternary)', textDecoration: 'none',
+                    display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                  }} title={issue.url}>
+                    <ExternalLink size={11} /> Open
                   </a>
                 )}
               </div>
@@ -920,31 +1008,47 @@ function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
 }
 
 function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: any[] }) {
+  const { t } = useI18n()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {variables.length > 0 && (
         <div>
-          <SectionTitle><FileText size={12} /> Deployment Configuration</SectionTitle>
-          <div className="card-surface" style={{ padding: 16 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '8px 24px' }}>
-              {variables.map((v, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8, fontSize: 13 }}>
-                  <span style={{ color: 'var(--text-quaternary)', minWidth: 160, fontWeight: 510 }}>{v.name}</span>
-                  <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{v.value}</span>
-                </div>
-              ))}
+          <SectionTitle><FileText size={12} /> Deployment Configuration ({variables.length})</SectionTitle>
+          <div className="card-surface" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.03em', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+              <span>Name</span><span>Value</span>
             </div>
+            {variables.map((v, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '7px 16px', borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none', fontSize: 13 }}>
+                <span style={{ color: 'var(--text-quaternary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.name}>{v.name}</span>
+                <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all', fontSize: 12 }}>{v.value}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
       {artifacts.length > 0 && (
         <div>
-          <SectionTitle><Box size={12} /> Artifacts</SectionTitle>
+          <SectionTitle><Box size={12} /> Artifacts ({artifacts.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {artifacts.map((a, i) => (
-              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{a.name}</span>
-                <span style={{ fontSize: 12, color: 'var(--text-quaternary)' }}>{(a.size / 1024).toFixed(1)} KB</span>
+              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Box size={14} style={{ color: 'var(--text-quaternary)', flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-quaternary)', flexShrink: 0, fontFamily: 'monospace' }}>
+                  {a.size != null ? `${(a.size / 1024).toFixed(1)} KB` : ''}
+                </span>
+                {a.link?.href && (
+                  <a
+                    href={a.link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+                    title={t('build.artifact_download')}
+                  >
+                    {t('build.artifact_download')}
+                  </a>
+                )}
               </div>
             ))}
           </div>
@@ -958,16 +1062,64 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
 }
 
 function TestsTab({ detail }: { detail: BuildDetailData }) {
-  const total = (detail.successfulTestCount ?? 0) + (detail.failedTestCount ?? 0) + (detail.skippedTestCount ?? 0)
+  const { t } = useI18n()
+  const passed = detail.successfulTestCount ?? 0
+  const failed = detail.failedTestCount ?? 0
+  const skipped = detail.skippedTestCount ?? 0
+  const total = passed + failed + skipped
+
   if (total === 0) {
     return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No test data</div>
   }
+
+  const passRate = Math.round((passed / total) * 100)
+  const pieData = [
+    ...(passed > 0 ? [{ name: 'Passed', value: passed, color: '#22c55e' }] : []),
+    ...(failed > 0 ? [{ name: 'Failed', value: failed, color: '#ef4444' }] : []),
+    ...(skipped > 0 ? [{ name: 'Skipped', value: skipped, color: '#737373' }] : []),
+  ]
+
   return (
-    <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-      <TestStat label="Passed" count={detail.successfulTestCount ?? 0} color="var(--success)" />
-      <TestStat label="Failed" count={detail.failedTestCount ?? 0} color="var(--error)" />
-      <TestStat label="Skipped" count={detail.skippedTestCount ?? 0} color="var(--text-quaternary)" />
-      <TestStat label="Total" count={total} color="var(--accent)" />
+    <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <TestStat label="Passed" count={passed} color="var(--success)" />
+        <TestStat label="Failed" count={failed} color="var(--error)" />
+        <TestStat label="Skipped" count={skipped} color="var(--text-quaternary)" />
+        <TestStat label="Total" count={total} color="var(--accent)" />
+      </div>
+      {total > 0 && (
+        <div className="card-surface" style={{ padding: 16, minWidth: 200 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 8, textAlign: 'center' }}>
+            {t('overview.pass_rate')}
+          </div>
+          <div style={{ position: 'relative', width: 140, height: 140, margin: '0 auto' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={42} outerRadius={60} paddingAngle={2} dataKey="value" startAngle={90} endAngle={-270}>
+                  {pieData.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              fontSize: 22, fontWeight: 510, color: failed > 0 ? 'var(--error)' : 'var(--success)',
+              letterSpacing: '-0.5px',
+            }}>
+              {passRate}%
+            </div>
+          </div>
+          {failed > 0 && (
+            <div style={{
+              marginTop: 8, textAlign: 'center', fontSize: 11, fontWeight: 500, color: 'var(--error)',
+              background: 'rgba(239,68,68,0.1)', padding: '3px 8px', borderRadius: 'var(--radius-pill)',
+            }}>
+              {failed} test{failed !== 1 ? 's' : ''} failed
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -1139,8 +1291,38 @@ function HistoryTab({
   if (loading) return <LoadingSpinner text="Loading plan history..." />
   if (!results.length) return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No build history available</div>
 
+  const chartData = results
+    .filter((r) => r.buildDurationInSeconds && r.buildDurationInSeconds > 0)
+    .slice(0, 20)
+    .reverse()
+    .map((r) => ({
+      name: `#${r.buildNumber ?? '?'}`,
+      duration: r.buildDurationInSeconds,
+      state: r.buildState ?? 'Unknown',
+    }))
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Duration trend chart */}
+      {chartData.length > 2 && (
+        <div className="card-surface" style={{ padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 12 }}>
+            {t('build.duration_chart')}
+          </div>
+          <ResponsiveContainer width="100%" height={160}>
+            <LineChart data={chartData}>
+              <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-quaternary)' }} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--text-quaternary)' }} unit="s" width={40} />
+              <Tooltip
+                contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 8, fontSize: 12 }}
+                formatter={(v) => [`${v}s`, 'Duration']}
+              />
+              <Line type="monotone" dataKey="duration" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       <SectionTitle><List size={12} /> Plan Results ({results.length})</SectionTitle>
       {results.map((r, i) => {
         const isCurrent = r.buildResultKey === currentKey

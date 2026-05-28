@@ -6,6 +6,7 @@ export type Route =
   | { page: 'settings' }
   | { page: 'logs' }
   | { page: 'health' }
+  | { page: 'overview' }
 
 interface NavigationContextValue {
   route: Route

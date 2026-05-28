@@ -7,7 +7,7 @@ const SECTIONS = ['appearance', 'polling', 'deployment', 'notifications'] as con
 type Section = typeof SECTIONS[number]
 
 const styles = {
-  layout: { display: 'flex', height: '100%', gap: 0 } as React.CSSProperties,
+  layout: { display: 'flex', height: '100%', gap: 0, overflow: 'hidden' } as React.CSSProperties,
 
   sidebar: {
     width: 180, flexShrink: 0, padding: '24px 0',
@@ -35,7 +35,7 @@ const styles = {
   }),
 
   content: {
-    flex: 1, overflow: 'auto', scrollBehavior: 'smooth',
+    flex: 1, overflow: 'auto', scrollBehavior: 'smooth', minWidth: 0,
   } as React.CSSProperties,
 
   saveBar: {

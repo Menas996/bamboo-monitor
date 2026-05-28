@@ -348,7 +348,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 24, height: '100%' }}>
+    <div style={{ display: 'flex', gap: 24, height: '100%', overflow: 'hidden' }}>
       <div style={{
         width: 260, flexShrink: 0, overflow: 'auto',
         borderRight: '1px solid var(--border-subtle)', paddingRight: 16,

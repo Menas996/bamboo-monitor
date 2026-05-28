@@ -1,7 +1,7 @@
 import { useState, ReactNode } from 'react'
 import { useI18n } from '../lib/i18n'
 import { useNavigate, useRoute, type Route } from '../pages/routes'
-import { LayoutDashboard, Settings as SettingsIcon, ScrollText, HeartPulse, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { LayoutDashboard, Settings as SettingsIcon, ScrollText, HeartPulse, PanelLeftClose, PanelLeft, BarChart3 } from 'lucide-react'
 
 interface Props {
   children: ReactNode
@@ -9,6 +9,7 @@ interface Props {
 
 const NAV_ITEMS = [
   { key: 'dashboard' as const, icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { key: 'overview' as const, icon: BarChart3, labelKey: 'nav.overview' },
   { key: 'settings' as const, icon: SettingsIcon, labelKey: 'nav.settings' },
 ]
 
@@ -94,7 +95,7 @@ export default function Layout({ children }: Props) {
       </div>
 
       {/* Main content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: collapsed ? '16px 20px' : '16px 32px' }}>
+      <div style={{ flex: 1, overflow: 'hidden', minWidth: 0, padding: collapsed ? '16px 20px' : '16px 32px' }}>
         {children}
       </div>
     </div>

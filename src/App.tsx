@@ -11,6 +11,7 @@ import { NavigationProvider, useRoute } from './pages/routes'
 import Settings from './pages/Settings'
 import Logs from './pages/Logs'
 import Health from './pages/Health'
+import Overview from './pages/Overview'
 import Layout from './components/Layout'
 
 declare global {
@@ -126,6 +127,7 @@ function AppShell() {
           {route.page === 'settings' && <Settings />}
           {route.page === 'logs' && <Logs />}
           {route.page === 'health' && <Health />}
+          {route.page === 'overview' && <Overview />}
         </Layout>
       </div>
     </>

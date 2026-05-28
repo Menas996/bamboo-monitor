@@ -43,7 +43,7 @@ export default function DeployCard({
   return (
     <div
       className="card-surface"
-      style={{ cursor: buildKey ? 'pointer' : 'default' }}
+      style={{ cursor: buildKey ? 'pointer' : 'default', overflow: 'hidden' }}
       onClick={() => buildKey && onOpenBuild?.(buildKey)}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -92,8 +92,8 @@ export default function DeployCard({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-quaternary)', textAlign: 'right', maxWidth: 200 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0, minWidth: 0 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-quaternary)', textAlign: 'right', minWidth: 0 }}>
             {triggerBy && (
               <div
                 title={triggerBy}

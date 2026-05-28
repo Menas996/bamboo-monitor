@@ -10,6 +10,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Nav
     'nav.dashboard': '仪表盘',
+    'nav.overview': '部署总览',
     'nav.settings': '设置',
     'nav.logs': '日志',
     'nav.health': '健康检查',
@@ -130,6 +131,31 @@ const translations: Record<Locale, Record<string, string>> = {
     'common.projects': '项目',
     'common.builds': '构建',
     'common.deployments': '部署',
+
+    // Overview
+    'overview.title': '部署总览',
+    'overview.last_deploys': '最近部署',
+    'overview.deploy_timeline': '部署时间线',
+    'overview.metrics': '数据指标',
+    'overview.status_dist': '构建状态分布',
+    'overview.duration_trend': '构建耗时趋势',
+    'overview.plan_build_count': '各计划构建次数',
+    'overview.no_favorites': '暂无收藏计划',
+    'overview.no_favorites.hint': '在仪表盘中收藏计划后，这里会展示其部署数据',
+    'overview.pass_rate': '测试通过率',
+    'overview.test_summary': '测试概况',
+
+    // Build Detail Enhanced
+    'build.plan_key': '计划 Key',
+    'build.build_url': 'Bamboo 链接',
+    'build.revision': '代码版本',
+    'build.test_pass_rate': '测试通过率',
+    'build.duration_chart': '耗时趋势',
+    'build.job_name': 'Job 名称',
+    'build.job_duration': '耗时',
+    'build.branch': '分支',
+    'build.commit_time': '提交时间',
+    'build.artifact_download': '下载',
   },
   'en-US': {
     // App
@@ -138,6 +164,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // Nav
     'nav.dashboard': 'Dashboard',
+    'nav.overview': 'Deploy Overview',
     'nav.settings': 'Settings',
     'nav.logs': 'Logs',
     'nav.health': 'Health',
@@ -257,6 +284,31 @@ const translations: Record<Locale, Record<string, string>> = {
     'common.projects': 'Projects',
     'common.builds': 'Builds',
     'common.deployments': 'Deployments',
+
+    // Overview
+    'overview.title': 'Deploy Overview',
+    'overview.last_deploys': 'Recent Deploys',
+    'overview.deploy_timeline': 'Deploy Timeline',
+    'overview.metrics': 'Metrics',
+    'overview.status_dist': 'Build Status Distribution',
+    'overview.duration_trend': 'Build Duration Trend',
+    'overview.plan_build_count': 'Builds per Plan',
+    'overview.no_favorites': 'No favorite plans',
+    'overview.no_favorites.hint': 'Favorite plans in the dashboard to see their deploy data here',
+    'overview.pass_rate': 'Test Pass Rate',
+    'overview.test_summary': 'Test Summary',
+
+    // Build Detail Enhanced
+    'build.plan_key': 'Plan Key',
+    'build.build_url': 'Bamboo URL',
+    'build.revision': 'Revision',
+    'build.test_pass_rate': 'Test Pass Rate',
+    'build.duration_chart': 'Duration Trend',
+    'build.job_name': 'Job Name',
+    'build.job_duration': 'Duration',
+    'build.branch': 'Branch',
+    'build.commit_time': 'Commit Time',
+    'build.artifact_download': 'Download',
   },
 }
 
