@@ -1,6 +1,6 @@
 import { useState, ReactNode } from 'react'
 import { useI18n } from '../lib/i18n'
-import { useNavigate, useRoute, type Route } from '../pages/routes'
+import { useNavigate, useRoute, useCameFrom, type Page } from '../pages/routes'
 import { LayoutDashboard, Settings as SettingsIcon, ScrollText, HeartPulse, PanelLeftClose, PanelLeft, BarChart3 } from 'lucide-react'
 
 interface Props {
@@ -22,10 +22,10 @@ export default function Layout({ children }: Props) {
   const { t } = useI18n()
   const navigate = useNavigate()
   const route = useRoute()
+  const cameFrom = useCameFrom()
   const [collapsed, setCollapsed] = useState(false)
 
-  // Determine sidebar active page. For build pages, highlight dashboard.
-  const page: Route['page'] = route.page === 'build' ? 'dashboard' : route.page
+  const page: Page = route.page === 'build' ? cameFrom : route.page
 
   return (
     <div style={{ height: '100%', display: 'flex', background: 'var(--bg-page)' }}>

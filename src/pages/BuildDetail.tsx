@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useI18n } from '../lib/i18n'
-import { useNavigate } from './routes'
+import { useNavigate, useGoBack } from './routes'
 import {
   collectChanges, isBuildRunning, shouldShowDeployProgress, computeDeployProgress, asArray,
   normalizePlanResults, pickPlanBuildResult, pickFallbackBuildForDelete,
@@ -74,6 +74,7 @@ interface BuildDetailProps {
 export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const goBack = useGoBack()
   const [detail, setDetail] = useState<BuildDetailData | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'changes' | 'variables' | 'tests' | 'history' | 'jira'>('summary')
@@ -465,7 +466,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   if (!detail) {
     return (
       <div style={{ padding: 32 }}>
-        <button className="btn-ghost" onClick={() => navigate({ page: 'dashboard' })} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
+        <button className="btn-ghost" onClick={goBack} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
           <ArrowLeft size={14} /> Back
         </button>
         <div style={{ color: 'var(--text-tertiary)' }}>Build not found</div>
@@ -541,7 +542,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       {/* Header */}
       <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
         <button
-          onClick={() => navigate({ page: 'dashboard' })}
+          onClick={goBack}
           style={{
             display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
             color: 'var(--text-tertiary)', fontSize: 13, cursor: 'pointer', marginBottom: 12,
@@ -649,6 +650,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
             hasMore={planHistoryHasMore}
             loadingMore={planHistoryLoadingMore}
             onLoadMore={() => void loadMorePlanHistory()}
+            onNavigate={(key) => navigate({ page: 'build', buildResultKey: key })}
           />
         )}
       </div>
@@ -1278,7 +1280,7 @@ function TestStat({ label, count, color }: { label: string; count: number; color
 }
 
 function HistoryTab({
-  results, loading, currentKey, hasMore, loadingMore, onLoadMore,
+  results, loading, currentKey, hasMore, loadingMore, onLoadMore, onNavigate,
 }: {
   results: any[]
   loading: boolean
@@ -1286,6 +1288,7 @@ function HistoryTab({
   hasMore?: boolean
   loadingMore?: boolean
   onLoadMore?: () => void
+  onNavigate?: (buildResultKey: string) => void
 }) {
   const { t } = useI18n()
   if (loading) return <LoadingSpinner text="Loading plan history..." />
@@ -1338,10 +1341,15 @@ function HistoryTab({
           <div
             key={r.buildResultKey ?? i}
             className="card-surface"
+            onClick={() => !isCurrent && onNavigate?.(r.buildResultKey)}
             style={{
               padding: '10px 14px',
               borderColor: isCurrent ? 'var(--accent)' : undefined,
+              cursor: isCurrent ? 'default' : onNavigate ? 'pointer' : 'default',
+              transition: 'background 0.15s ease, transform 0.15s ease',
             }}
+            onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = 'var(--bg-elevated)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <StatusBadge status={running ? 'InProgress' : (r.buildState ?? 'Unknown')} />

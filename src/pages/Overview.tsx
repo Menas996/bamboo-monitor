@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { useI18n } from '../lib/i18n'
 import { useNavigate } from './routes'
 import StatusBadge from '../components/StatusBadge'
@@ -213,13 +213,9 @@ export default function Overview() {
             <SectionTitle>{t('overview.last_deploys')}</SectionTitle>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
               {snapshots.map((s, i) => (
-                <div
+                <HoverCard
                   key={s.buildResultKey}
-                  className="card-surface"
-                  style={{
-                    padding: '12px 16px', cursor: 'pointer', overflow: 'hidden',
-                    opacity: 1, animation: `fadeSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) ${i * 40}ms both`,
-                  }}
+                  delay={i * 40}
                   onClick={() => navigate({ page: 'build', buildResultKey: s.buildResultKey })}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 }}>
@@ -234,7 +230,7 @@ export default function Overview() {
                     {s.buildDurationInSeconds && <span>{s.buildDurationInSeconds > 60 ? `${Math.floor(s.buildDurationInSeconds / 60)}m ${s.buildDurationInSeconds % 60}s` : `${s.buildDurationInSeconds}s`}</span>}
                     {s.startTime && <span>{new Date(s.startTime).toLocaleString()}</span>}
                   </div>
-                </div>
+                </HoverCard>
               ))}
             </div>
           </section>
@@ -375,6 +371,32 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
       letterSpacing: '-0.28px', marginBottom: 12,
       display: 'flex', alignItems: 'center', gap: 8,
     }}>
+      {children}
+    </div>
+  )
+}
+
+function HoverCard({ onClick, delay = 0, children, style }: {
+  onClick?: () => void; delay?: number; children: React.ReactNode; style?: CSSProperties
+}) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      className="card-surface"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        padding: '12px 16px', cursor: onClick ? 'pointer' : 'default', overflow: 'hidden',
+        transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
+        boxShadow: hovered
+          ? '0 4px 16px rgba(0,0,0,0.12), var(--shadow-card)'
+          : 'var(--shadow-card)',
+        transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.15s ease',
+        animation: `fadeSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) ${delay}ms both`,
+        ...style,
+      }}
+    >
       {children}
     </div>
   )
