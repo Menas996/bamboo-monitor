@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld('actions', {
     ipcRenderer.invoke('bamboo:queueBuild', planKey, variables),
   deleteBuildResult: (buildResultKey: string) =>
     ipcRenderer.invoke('bamboo:deleteBuildResult', buildResultKey),
+  stopBuild: (buildResultKey: string) =>
+    ipcRenderer.invoke('bamboo:stopBuild', buildResultKey),
   openUrl: (path: string) => ipcRenderer.invoke('bamboo:openUrl', path),
 })
 

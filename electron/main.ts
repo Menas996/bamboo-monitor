@@ -386,6 +386,17 @@ if (!gotTheLock) {
       }
     })
 
+    ipcMain.handle('bamboo:stopBuild', async (_e, buildResultKey: string) => {
+      logger.operation('stop-build', { buildResultKey })
+      if (!bamboo) return { success: false, errorMessage: 'Not connected' }
+      try {
+        return await bamboo.stopBuild(buildResultKey)
+      } catch (err: any) {
+        logger.error('API', `stopBuild failed for ${buildResultKey}: ${err.message}`)
+        return { success: false, errorMessage: err.message }
+      }
+    })
+
     ipcMain.handle('bamboo:openUrl', async (_e, path: string) => {
       if (!bamboo) return
       const url = bamboo.getServerUrl() + path

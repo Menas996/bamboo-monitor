@@ -14,6 +14,7 @@ import {
   ArrowLeft, GitCommit, Clock, User, Layers, AlertTriangle,
   FileText, Box, List, MoreVertical, RefreshCw, Play, Trash2,
   Bug, ToggleLeft, Star, Settings, Tag, Check, X, ExternalLink, GitBranch,
+  Ban, RotateCw, Activity,
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
 
@@ -77,7 +78,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const goBack = useGoBack()
   const [detail, setDetail] = useState<BuildDetailData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'changes' | 'variables' | 'tests' | 'history' | 'jira'>('summary')
+  const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'changes' | 'variables' | 'tests' | 'history' | 'jira' | 'deployments'>('summary')
   const [planResults, setPlanResults] = useState<any[]>([])
   const [planResultsLoading, setPlanResultsLoading] = useState(false)
   const [planHistoryHasMore, setPlanHistoryHasMore] = useState(false)
@@ -519,6 +520,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     { key: 'changes', label: `Changes (${normalizedChanges.length})` },
     { key: 'variables', label: `Config (${detail.variables?.variable?.length ?? 0})` },
     { key: 'tests', label: 'Tests' },
+    { key: 'deployments', label: `Deployments` },
     { key: 'history', label: `History` },
   ] as const
 
@@ -642,6 +644,14 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         )}
         {activeTab === 'variables' && <VariablesTab variables={detail.variables?.variable ?? []} artifacts={detail.artifacts?.artifact ?? []} />}
         {activeTab === 'tests' && <TestsTab detail={detail} />}
+        {activeTab === 'deployments' && (
+          <DeploymentsTab
+            planKey={detail.plan?.key ?? routePlanKey}
+            planName={detail.planName ?? detail.plan?.name ?? routePlanKey}
+            currentBuildResultKey={buildResultKey}
+            onNavigate={(key) => navigate({ page: 'build', buildResultKey: key })}
+          />
+        )}
         {activeTab === 'history' && (
           <HistoryTab
             results={planResults}
@@ -1402,6 +1412,370 @@ function HistoryTab({
             {loadingMore ? t('common.loading_more') : t('common.load_more')}
           </button>
         </div>
+      )}
+    </div>
+  )
+}
+
+interface DeployHistoryRow {
+  buildResultKey: string
+  buildState?: string
+  lifeCycleState?: string
+  buildNumber?: number
+  reason?: string
+  startTime?: number
+  buildDuration?: number
+  buildDurationInSeconds?: number
+}
+
+function DeploymentsTab({
+  planKey,
+  planName,
+  currentBuildResultKey,
+  onNavigate,
+}: {
+  planKey: string
+  planName: string
+  currentBuildResultKey: string
+  onNavigate: (key: string) => void
+}) {
+  const { t } = useI18n()
+  const [deploys, setDeploys] = useState<DeployHistoryRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [offset, setOffset] = useState(0)
+  const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [actingKey, setActingKey] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const PAGE_SIZE = 20
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function showMsg(type: 'success' | 'error', text: string) {
+    setActionMsg({ type, text })
+    setTimeout(() => setActionMsg(null), 4000)
+  }
+
+  function isFailedOrCancelled(row: DeployHistoryRow): boolean {
+    const st = (row.buildState ?? '').toUpperCase()
+    return st === 'FAILED' || st === 'FAILURE' || st === 'CANCELLED'
+  }
+
+  function isSuccess(row: DeployHistoryRow): boolean {
+    const st = (row.buildState ?? '').toUpperCase()
+    return st === 'SUCCESS' || st === 'SUCCESSFUL'
+  }
+
+  // 加载部署历史（首次 + 手动刷新）
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      try {
+        const { rows, hasMore: more } = await window.bamboo.getPlanResultsHistoryPage(
+          planKey, 0, PAGE_SIZE
+        )
+        if (!cancelled) {
+          setDeploys(rows ?? [])
+          setHasMore(more)
+          setOffset(PAGE_SIZE)
+        }
+      } catch {
+        if (!cancelled) { setDeploys([]); setHasMore(false) }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [planKey, refreshKey])
+
+  // 实时轮询：当存在运行中的部署时，5s 刷新以同步 Bamboo 状态变更
+  useEffect(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+    const hasRunning = deploys.some((r) => isBuildRunning(r))
+    if (!hasRunning) return
+
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const { rows } = await window.bamboo.getPlanResultsHistoryPage(planKey, 0, PAGE_SIZE)
+        setDeploys((prev) => {
+          const freshMap = new Map((rows ?? []).map((r: DeployHistoryRow) => [r.buildResultKey, r]))
+          const merged = prev.map((r) => freshMap.get(r.buildResultKey) ?? r)
+          // 新触发的部署（prev 中不存在）插入到列表头部
+          const prevKeys = new Set(prev.map((r) => r.buildResultKey))
+          for (const r of rows ?? []) {
+            if (r.buildResultKey && !prevKeys.has(r.buildResultKey)) merged.unshift(r)
+          }
+          return merged
+        })
+      } catch { /* ignore poll errors */ }
+    }, 5000)
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    }
+  }, [deploys, planKey])
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    const start = offset
+    try {
+      const { rows, hasMore: more } = await window.bamboo.getPlanResultsHistoryPage(planKey, start, PAGE_SIZE)
+      setDeploys((prev) => {
+        const seen = new Set(prev.map((r) => r.buildResultKey))
+        const merged = [...prev]
+        for (const row of rows ?? []) {
+          if (row.buildResultKey && !seen.has(row.buildResultKey)) {
+            seen.add(row.buildResultKey)
+            merged.push(row)
+          }
+        }
+        return merged
+      })
+      setHasMore(more)
+      setOffset(start + PAGE_SIZE)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // 中断部署：调用 Bamboo 原生中断能力（停止运行中 / 取消排队）
+  async function handleStop(buildResultKey: string) {
+    setActingKey(buildResultKey)
+    try {
+      const result = await window.actions.stopBuild(buildResultKey)
+      if (result.success) {
+        showMsg('success', t('deploy.stop_success'))
+        setRefreshKey((k) => k + 1)
+      } else {
+        showMsg('error', result.errorMessage || t('deploy.stop_failed'))
+      }
+    } catch {
+      showMsg('error', t('deploy.stop_failed'))
+    } finally {
+      setActingKey(null)
+    }
+  }
+
+  // 重试部署：重新触发 Bamboo 构建（对失败/中断的部署记录发起重试）
+  async function handleRetry() {
+    if (!planKey) return
+    setActingKey('retry')
+    try {
+      const result = await window.actions.queueBuild(planKey)
+      if (result.success) {
+        showMsg('success', t('deploy.retry_success'))
+        setRefreshKey((k) => k + 1)
+        if (result.buildResultKey) onNavigate(result.buildResultKey)
+      } else {
+        showMsg('error', result.errorMessage || t('deploy.retry_failed'))
+      }
+    } catch {
+      showMsg('error', t('deploy.retry_failed'))
+    } finally {
+      setActingKey(null)
+    }
+  }
+
+  if (loading) return <LoadingSpinner text={t('deploy.loading')} />
+
+  // 统计摘要
+  let successCount = 0, failedCount = 0, runningCount = 0
+  for (const r of deploys) {
+    if (isBuildRunning(r)) runningCount++
+    else if (isFailedOrCancelled(r)) failedCount++
+    else if (isSuccess(r)) successCount++
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* 环境信息 + 统计摘要 */}
+      <div className="card-surface" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Activity size={14} style={{ color: 'var(--accent)' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            {t('deploy.environment')}
+          </span>
+          <span style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }}>{planName}</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', gap: 14, fontSize: 12, color: 'var(--text-tertiary)', alignItems: 'center' }}>
+          <span>{t('deploy.total')}: <strong style={{ color: 'var(--text-primary)' }}>{deploys.length}</strong></span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--success)' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />
+            {successCount}
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--error)' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--error)' }} />
+            {failedCount}
+          </span>
+          {runningCount > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--accent)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+              {runningCount}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 操作反馈消息 */}
+      {actionMsg && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '8px 14px', borderRadius: 'var(--radius-md)',
+          background: actionMsg.type === 'success' ? 'rgba(39,166,68,0.1)' : 'rgba(239,68,68,0.1)',
+          color: actionMsg.type === 'success' ? 'var(--success)' : 'var(--error)',
+          fontSize: 13, fontWeight: 510,
+        }}>
+          {actionMsg.type === 'success' ? <Check size={13} /> : <X size={13} />}
+          {actionMsg.text}
+        </div>
+      )}
+
+      {/* 部署历史列表 */}
+      {!deploys.length ? (
+        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>
+          {t('deploy.no_history')}
+        </div>
+      ) : (
+        <>
+          <SectionTitle><Activity size={12} /> {t('deploy.history_title')} ({deploys.length})</SectionTitle>
+          {deploys.map((r, i) => {
+            const isCurrent = r.buildResultKey === currentBuildResultKey
+            const running = isBuildRunning(r)
+            const canRetry = isFailedOrCancelled(r)
+            const duration = r.buildDurationInSeconds
+              ? r.buildDurationInSeconds > 60
+                ? `${Math.floor(r.buildDurationInSeconds / 60)}m ${r.buildDurationInSeconds % 60}s`
+                : `${r.buildDurationInSeconds}s`
+              : r.buildDuration
+                ? formatDuration(r.buildDuration)
+                : '-'
+            return (
+              <div
+                key={r.buildResultKey ?? i}
+                className="card-surface"
+                style={{
+                  padding: '12px 16px',
+                  borderColor: isCurrent ? 'var(--accent)' : undefined,
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <StatusBadge status={running ? 'InProgress' : (r.buildState ?? 'Unknown')} />
+                  {running && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 510, color: 'var(--accent)',
+                      padding: '1px 6px', borderRadius: 'var(--radius-pill)',
+                      background: 'rgba(94, 106, 210, 0.15)',
+                      animation: 'pulse 1.5s ease-in-out infinite',
+                      flexShrink: 0,
+                    }}>
+                      {t('status.in_progress')}
+                    </span>
+                  )}
+                  <span style={{
+                    fontSize: 13, fontWeight: 510, color: 'var(--accent)',
+                    fontFamily: 'monospace', minWidth: 64, flexShrink: 0,
+                  }}>
+                    #{r.buildNumber ?? '?'}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12, color: 'var(--text-secondary)', flex: 1, minWidth: 120,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}
+                    title={r.reason}
+                  >
+                    {r.reason || '—'}
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)', minWidth: 50, flexShrink: 0, fontFamily: 'monospace' }}>
+                    {duration}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-quaternary)', minWidth: 130, textAlign: 'right', flexShrink: 0 }}>
+                    {r.startTime ? new Date(r.startTime).toLocaleString() : '—'}
+                  </span>
+
+                  {/* 中断按钮 —— 仅运行中的部署可中断 */}
+                  {running && (
+                    <button
+                      onClick={() => void handleStop(r.buildResultKey)}
+                      disabled={actingKey !== null}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '4px 10px', fontSize: 12, fontWeight: 510,
+                        borderRadius: 'var(--radius-md)', fontFamily: 'inherit',
+                        background: 'rgba(239,68,68,0.1)', color: 'var(--error)',
+                        border: '1px solid rgba(239,68,68,0.25)',
+                        cursor: actingKey ? 'wait' : 'pointer',
+                        opacity: actingKey ? 0.6 : 1,
+                        transition: 'all 0.15s ease', flexShrink: 0,
+                      }}
+                    >
+                      <Ban size={11} /> {actingKey === r.buildResultKey ? '…' : t('deploy.stop')}
+                    </button>
+                  )}
+
+                  {/* 重试按钮 —— 仅失败/中断的部署可重试 */}
+                  {canRetry && !running && (
+                    <button
+                      onClick={() => void handleRetry()}
+                      disabled={actingKey !== null}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        padding: '4px 10px', fontSize: 12, fontWeight: 510,
+                        borderRadius: 'var(--radius-md)', fontFamily: 'inherit',
+                        background: 'rgba(94,106,210,0.1)', color: 'var(--accent)',
+                        border: '1px solid rgba(94,106,210,0.25)',
+                        cursor: actingKey ? 'wait' : 'pointer',
+                        opacity: actingKey ? 0.6 : 1,
+                        transition: 'all 0.15s ease', flexShrink: 0,
+                      }}
+                    >
+                      <RotateCw size={11} /> {actingKey === 'retry' ? '…' : t('deploy.retry')}
+                    </button>
+                  )}
+
+                  {/* 查看详情 —— 跳转到该构建的详情页 */}
+                  <button
+                    onClick={() => !isCurrent && onNavigate(r.buildResultKey)}
+                    disabled={isCurrent}
+                    className="btn-ghost"
+                    style={{
+                      fontSize: 12, padding: '4px 10px', flexShrink: 0,
+                      cursor: isCurrent ? 'default' : 'pointer',
+                      opacity: isCurrent ? 0.4 : 1,
+                    }}
+                  >
+                    {t('deploy.view_detail')}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+
+          {hasMore && (
+            <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12 }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                style={{
+                  fontSize: 12, fontWeight: 510, padding: '8px 18px',
+                  opacity: loadingMore ? 0.6 : 1, transition: 'opacity 0.15s ease',
+                }}
+              >
+                {loadingMore ? t('common.loading_more') : t('common.load_more')}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

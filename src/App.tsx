@@ -56,8 +56,9 @@ declare global {
       isMaximized: () => Promise<boolean>
     }
     actions: {
-      queueBuild: (planKey: string, variables?: Record<string, string>) => Promise<{ success: boolean; buildResultKey?: string }>
+      queueBuild: (planKey: string, variables?: Record<string, string>) => Promise<{ success: boolean; buildResultKey?: string; errorMessage?: string }>
       deleteBuildResult: (buildResultKey: string) => Promise<boolean>
+      stopBuild: (buildResultKey: string) => Promise<{ success: boolean; errorMessage?: string }>
       openUrl: (path: string) => Promise<void>
     }
   }

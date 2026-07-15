@@ -69,6 +69,20 @@ const translations: Record<Locale, Record<string, string>> = {
     'deploy.finished': '完成时间',
     'deploy.reason': '原因',
 
+    // Deployments History (子项目详情 - 部署历史模块)
+    'deploy.loading': '加载部署历史…',
+    'deploy.no_history': '暂无部署历史',
+    'deploy.history_title': '部署历史',
+    'deploy.environment': '环境',
+    'deploy.total': '总计',
+    'deploy.stop': '中断',
+    'deploy.stop_success': '部署已中断',
+    'deploy.stop_failed': '中断部署失败，该部署可能已结束',
+    'deploy.retry': '重试',
+    'deploy.retry_success': '已发起重试部署',
+    'deploy.retry_failed': '重试部署失败',
+    'deploy.view_detail': '详情',
+
     // Status
     'status.success': '成功',
     'status.failed': '失败',
@@ -221,6 +235,20 @@ const translations: Record<Locale, Record<string, string>> = {
     'deploy.started': 'Started',
     'deploy.finished': 'Finished',
     'deploy.reason': 'Reason',
+
+    // Deployments History
+    'deploy.loading': 'Loading deployment history…',
+    'deploy.no_history': 'No deployment history',
+    'deploy.history_title': 'Deployment History',
+    'deploy.environment': 'Environment',
+    'deploy.total': 'Total',
+    'deploy.stop': 'Abort',
+    'deploy.stop_success': 'Deployment aborted',
+    'deploy.stop_failed': 'Failed to abort — deployment may have already finished',
+    'deploy.retry': 'Retry',
+    'deploy.retry_success': 'Retry deployment triggered',
+    'deploy.retry_failed': 'Failed to retry deployment',
+    'deploy.view_detail': 'Details',
 
     // Status
     'status.success': 'Success',

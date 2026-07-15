@@ -1185,6 +1185,87 @@ export class BambooClient {
     }
   }
 
+  /**
+   * 停止/中断一个部署（构建）。
+   *
+   * Bamboo 原生支持两种中断场景：
+   *  1. 正在运行（IN_PROGRESS）—— 通过 Struts action `stopPlan.action` 下发停止信号
+   *  2. 排队中（QUEUED）—— 通过 REST API `DELETE /queue/{buildResultKey}` 从队列移除
+   *
+   * 本方法同时尝试两种途径，覆盖 Bamboo 原生部署中断的全部能力，前端无需判断当前状态。
+   * 参考 deleteBuildResult 的实现模式（form post + X-Atlassian-Token: no-check）。
+   */
+  async stopBuild(buildResultKey: string): Promise<{ success: boolean; errorMessage?: string }> {
+    const parsed = this.parseBuildResultKeyForDelete(buildResultKey)
+    if (!parsed) {
+      logger.error('API', `stopBuild: invalid key ${buildResultKey}`)
+      return { success: false, errorMessage: `Invalid build result key: ${buildResultKey}` }
+    }
+
+    const { planKey, buildNumber } = parsed
+    const cookieHeader = this.getCookieHeader()
+    const authHeaders = this.authMethod === 'session'
+      ? { Cookie: cookieHeader }
+      : { Authorization: this.auth }
+
+    // 途径 1：停止正在运行的构建（Struts action，与 Bamboo 原生 UI「Stop build」一致）
+    try {
+      const body = new URLSearchParams({
+        planKey,
+        buildNumber: String(buildNumber),
+      })
+      const res = await fetch(`${this.baseUrl}/build/admin/stopPlan.action`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Atlassian-Token': 'no-check',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: body.toString(),
+        redirect: 'manual',
+      })
+      // 302 重定向 / 200 / 204 均视为成功（与 deleteBuildResult 一致的成功判定）
+      if (res.status === 302 || res.status === 200 || res.status === 204) {
+        logger.info('API', `stopBuild(${buildResultKey}): success via stopPlan.action`, {
+          planKey, buildNumber, status: res.status,
+        })
+        return { success: true }
+      }
+      logger.warn('API', `stopBuild stopPlan.action returned ${res.status}`, { planKey, buildNumber })
+    } catch (err: any) {
+      logger.warn('API', `stopBuild stopPlan.action failed: ${err.message}`)
+    }
+
+    // 途径 2：取消排队中的构建（REST API，与 Bamboo 原生 UI「Cancel queued build」一致）
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/rest/api/latest/queue/${encodeURIComponent(buildResultKey)}`,
+        {
+          method: 'DELETE',
+          headers: { ...authHeaders, Accept: 'application/json' },
+        }
+      )
+      if (res.ok) {
+        logger.info('API', `stopBuild(${buildResultKey}): success via DELETE queue`, {
+          planKey, buildNumber, status: res.status,
+        })
+        return { success: true }
+      }
+      const text = await res.text().catch(() => '')
+      logger.warn('API', `stopBuild DELETE queue returned ${res.status}`, {
+        body: text.slice(0, 200),
+      })
+    } catch (err: any) {
+      logger.warn('API', `stopBuild DELETE queue failed: ${err.message}`)
+    }
+
+    return {
+      success: false,
+      errorMessage: 'Unable to stop build — it may have already finished or left the queue',
+    }
+  }
+
   getBambooUrl(path: string): string {
     return `${this.baseUrl}${path}`
   }
