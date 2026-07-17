@@ -31,7 +31,7 @@
   --ring-border: rgba(255, 255, 255, 0.08) 0px 0px 0px 1px;
   --shadow-card: rgba(255,255,255,0.06) 0px 0px 0px 1px, rgba(0,0,0,0.2) 0px 2px 2px, rgba(255,255,255,0.03) 0px 0px 0px 1px;
   --shadow-subtle: rgba(255,255,255,0.06) 0px 0px 0px 1px, rgba(0,0,0,0.15) 0px 2px 2px;
-  --focus-ring: 2px solid hsla(212, 100%, 48%, 1);
+  --focus-ring: 0 0 0 2px hsla(212, 100%, 48%, 0.85);
 
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -65,6 +65,7 @@ body {
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -182,6 +183,40 @@ body {
     border-radius: var(--radius-lg);
     padding: 16px;
     transition: background 0.2s ease;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .scroll-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .scroll-row__grow {
+    flex: 1 1 0%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .scroll-row__meta {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .select-linear {

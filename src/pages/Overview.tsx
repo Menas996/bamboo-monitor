@@ -204,7 +204,7 @@ export default function Overview() {
   }
 
   return (
-    <div style={{ height: '100%', overflow: 'auto', scrollBehavior: 'smooth' }}>
+    <div style={{ height: '100%', overflow: 'auto', scrollBehavior: 'smooth', padding: '4px' }}>
       <div style={{ maxWidth: 960, paddingBottom: 48 }}>
         <RevealSection>
           <h1 style={{ fontSize: 20, fontWeight: 510, color: 'var(--text-primary)', letterSpacing: '-0.24px', marginBottom: 24 }}>
@@ -230,10 +230,10 @@ export default function Overview() {
                     }} title={s.planName}>{s.planName}</span>
                     <StatusBadge status={statusBadgeKey(s)} />
                   </div>
-                  <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-tertiary)' }}>
-                    <span style={{ fontFamily: 'monospace' }}>#{s.buildNumber}</span>
-                    {s.buildDurationInSeconds && <span>{s.buildDurationInSeconds > 60 ? `${Math.floor(s.buildDurationInSeconds / 60)}m ${s.buildDurationInSeconds % 60}s` : `${s.buildDurationInSeconds}s`}</span>}
-                    {s.startTime && <span>{new Date(s.startTime).toLocaleString()}</span>}
+                  <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-tertiary)', minWidth: 0, overflow: 'hidden' }}>
+                    <span style={{ fontFamily: 'monospace', flexShrink: 0 }}>#{s.buildNumber}</span>
+                    {s.buildDurationInSeconds && <span style={{ flexShrink: 0 }}>{s.buildDurationInSeconds > 60 ? `${Math.floor(s.buildDurationInSeconds / 60)}m ${s.buildDurationInSeconds % 60}s` : `${s.buildDurationInSeconds}s`}</span>}
+                    {s.startTime && <span className="truncate" style={{ flex: '1 1 auto', textAlign: 'right' }}>{new Date(s.startTime).toLocaleString()}</span>}
                   </div>
                 </HoverCard>
               ))}
@@ -245,12 +245,14 @@ export default function Overview() {
         <RevealSection delay={120}>
           <section style={{ marginBottom: 40 }}>
             <SectionTitle>{t('overview.deploy_timeline')}</SectionTitle>
-            <div className="card-surface" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card-surface" style={{ padding: 0, borderRadius: 'var(--radius-lg)' }}>
               {timeline.slice(0, 20).map((e, i) => (
                 <div
                   key={`${e.key}-${i}`}
+                  className="scroll-row"
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
+                    gap: 12, padding: '8px 16px',
+                    borderRadius: i === 0 ? 'var(--radius-lg) var(--radius-lg) 0 0' : i === Math.min(timeline.length, 20) - 1 ? '0 0 var(--radius-lg) var(--radius-lg)' : 0,
                     borderBottom: i < Math.min(timeline.length, 20) - 1 ? '1px solid var(--border-subtle)' : 'none',
                     cursor: 'pointer', transition: 'background 0.15s ease',
                     opacity: 1, animation: `fadeSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) ${i * 30}ms both`,
@@ -259,7 +261,7 @@ export default function Overview() {
                   onMouseEnter={(ev) => { ev.currentTarget.style.background = 'var(--bg-elevated)' }}
                   onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent' }}
                 >
-                  <span style={{ fontSize: 11, color: 'var(--text-quaternary)', width: 140, flexShrink: 0, fontFamily: 'monospace' }}>
+                  <span className="scroll-row__meta" style={{ fontSize: 11, color: 'var(--text-quaternary)', flex: '0 1 140px', maxWidth: 160, fontFamily: 'monospace' }}>
                     {e.startTime ? new Date(e.startTime).toLocaleString() : '—'}
                   </span>
                   <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.planName}>
@@ -268,7 +270,7 @@ export default function Overview() {
                   <span style={{ fontSize: 11, color: 'var(--text-quaternary)', fontFamily: 'monospace', flexShrink: 0 }}>
                     #{e.buildNumber}
                   </span>
-                  <StatusBadge status={statusBadgeKey(e)} />
+                  <span style={{ flexShrink: 0 }}><StatusBadge status={statusBadgeKey(e)} /></span>
                   {e.duration && (
                     <span style={{ fontSize: 11, color: 'var(--text-quaternary)', width: 50, textAlign: 'right', flexShrink: 0 }}>
                       {e.duration > 60 ? `${Math.floor(e.duration / 60)}m${e.duration % 60}s` : `${e.duration}s`}
@@ -392,7 +394,7 @@ function HoverCard({ onClick, delay = 0, children, style }: {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        padding: '12px 16px', cursor: onClick ? 'pointer' : 'default', overflow: 'hidden',
+        padding: '12px 16px', cursor: onClick ? 'pointer' : 'default',
         transform: hovered ? 'translateY(-2px)' : 'translateY(0)',
         boxShadow: hovered
           ? '0 4px 16px rgba(0,0,0,0.12), var(--shadow-card)'

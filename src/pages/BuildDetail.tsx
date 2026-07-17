@@ -585,6 +585,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       height: '100%', display: 'flex', flexDirection: 'column', position: 'relative',
       opacity: transitioning ? 0.92 : 1,
       transition: 'opacity 0.28s ease',
+      minWidth: 0,
     }}>
       {transitioning && (
         <div style={{
@@ -610,16 +611,16 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
           <ArrowLeft size={14} /> {t('nav.dashboard')}
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 510, color: 'var(--text-primary)', letterSpacing: '-0.24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+            <h1 className="truncate" style={{ fontSize: 20, fontWeight: 510, color: 'var(--text-primary)', letterSpacing: '-0.24px' }} title={detail.planName ?? detail.plan?.name ?? buildResultKey}>
               {detail.planName ?? detail.plan?.name ?? buildResultKey}
             </h1>
-            <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
+            <p className="truncate" style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
               {displayDetail.projectName} — #{displayBuildNumber}
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
             {actionMsg && (
               <span style={{
                 fontSize: 12, padding: '4px 10px', borderRadius: 'var(--radius-pill)',
@@ -700,7 +701,10 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         )}
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 0, marginTop: 16, borderBottom: '1px solid var(--border-subtle)' }}>
+        <div style={{
+          display: 'flex', gap: 0, marginTop: 16, borderBottom: '1px solid var(--border-subtle)',
+          overflowX: 'auto', minWidth: 0, scrollbarWidth: 'none',
+        }}>
           {tabs.map((tab) => (
             <button
               key={tab.key}
@@ -709,7 +713,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                 padding: '8px 16px', background: 'none', border: 'none', borderBottom: `2px solid ${activeTab === tab.key ? 'var(--accent)' : 'transparent'}`,
                 color: activeTab === tab.key ? 'var(--text-primary)' : 'var(--text-tertiary)',
                 fontSize: 13, fontWeight: 510, fontFamily: 'inherit', fontFeatureSettings: '"cv01", "ss03"',
-                cursor: 'pointer', transition: 'all 0.15s ease',
+                cursor: 'pointer', transition: 'all 0.15s ease', flexShrink: 0, whiteSpace: 'nowrap',
               }}
             >
               {tab.label}
@@ -719,7 +723,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: 24, minWidth: 0, minHeight: 0 }}>
         {activeTab === 'summary' && <SummaryTab detail={detail} />}
         {activeTab === 'stages' && <StagesTab stages={stages} buildResultKey={detail.buildResultKey} isFailed={detail.buildState === 'Failed'} />}
         {activeTab === 'jira' && <JiraTab jiraIssues={detail.jiraIssues?.jiraIssue ?? []} />}
@@ -929,7 +933,7 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
         const jobs = getJobs(s)
         const isExpanded = expandedStage === i
         return (
-          <div key={i} className="card-surface" style={{ padding: '14px 18px', overflow: 'hidden' }}>
+          <div key={i} className="card-surface" style={{ padding: '14px 18px' }}>
             <div
               style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: jobs.length ? 'pointer' : 'default' }}
               onClick={() => { if (jobs.length) setExpandedStage(isExpanded ? null : i) }}
@@ -941,22 +945,22 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
               }}>
                 {i + 1}
               </span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }}>{s.name}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="truncate" style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }} title={s.name}>{s.name}</div>
                 {jobs.length > 0 && (
                   <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 2 }}>
                     {jobs.length} job{jobs.length !== 1 ? 's' : ''}
                   </div>
                 )}
               </div>
-              {s.state && <StatusBadge status={s.state} />}
+              {s.state && <span style={{ flexShrink: 0 }}><StatusBadge status={s.state} /></span>}
               {jobs.length > 0 && (
-                <span style={{ fontSize: 11, color: 'var(--text-quaternary)', transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                <span style={{ fontSize: 11, color: 'var(--text-quaternary)', flexShrink: 0, transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
               )}
             </div>
             {isExpanded && jobs.length > 0 && (
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: 4, fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', padding: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 8, fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', padding: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                   <span>{t('build.job_name')}</span>
                   <span>Status</span>
                   <span style={{ textAlign: 'right' }}>{t('build.job_duration')}</span>
@@ -964,12 +968,12 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
                 {jobs.map((job: any, j: number) => {
                   const duration = job.buildDurationInSeconds ?? (job.buildDuration ? Math.round(job.buildDuration / 1000) : undefined)
                   return (
-                    <div key={j} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: 4, padding: '5px 0', borderTop: j > 0 ? '1px solid var(--border-subtle)' : 'none', alignItems: 'center' }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.name}>
+                    <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 8, padding: '5px 0', borderTop: j > 0 ? '1px solid var(--border-subtle)' : 'none', alignItems: 'center' }}>
+                      <span className="truncate" style={{ fontSize: 12, color: 'var(--text-secondary)' }} title={job.name}>
                         {job.name ?? `Job ${j + 1}`}
                       </span>
-                      <StatusBadge status={job.state ?? job.lifeCycleState ?? 'Unknown'} />
-                      <span style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right', fontFamily: 'monospace' }}>
+                      <span style={{ flexShrink: 0 }}><StatusBadge status={job.state ?? job.lifeCycleState ?? 'Unknown'} /></span>
+                      <span style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                         {duration != null ? (duration > 60 ? `${Math.floor(duration / 60)}m${duration % 60}s` : `${duration}s`) : '-'}
                       </span>
                     </div>
@@ -1023,18 +1027,14 @@ function ChangesTab({ changes, vcs }: { changes: NormalizedChange[]; vcs: any[] 
           <SectionTitle><GitCommit size={12} /> Commits ({changes.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {changes.map((c, i) => (
-              <div key={i} className="card-surface" style={{ padding: '10px 14px', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <span style={{
-                    fontSize: 12, fontWeight: 510, color: 'var(--accent)', minWidth: 120, flexShrink: 0,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
+              <div key={i} className="card-surface" style={{ padding: '10px 14px' }}>
+                <div className="scroll-row" style={{ gap: 12 }}>
+                  <span className="scroll-row__meta" style={{
+                    fontSize: 12, fontWeight: 510, color: 'var(--accent)', flex: '0 1 120px', maxWidth: 160,
+                  }} title={c.author ?? 'unknown'}>
                     {c.author ?? 'unknown'}
                   </span>
-                  <span style={{
-                    fontSize: 13, color: 'var(--text-secondary)', flex: 1, minWidth: 0,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }} title={c.message}>
+                  <span className="scroll-row__grow" style={{ fontSize: 13, color: 'var(--text-secondary)' }} title={c.message}>
                     {c.message || t('build.no_commit_message')}
                   </span>
                   {c.vcsRevisionKey && (
@@ -1068,9 +1068,9 @@ function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
           <SectionTitle><ExternalLink size={12} /> Jira Issues ({jiraIssues.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {jiraIssues.map((issue: any, i: number) => (
-              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', gap: 12, alignItems: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 510, color: 'var(--accent)', minWidth: 140 }}>{issue.key}</span>
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={issue.summary}>
+              <div key={i} className="card-surface scroll-row" style={{ padding: '10px 14px', gap: 12 }}>
+                <span className="scroll-row__meta" style={{ fontSize: 12, fontWeight: 510, color: 'var(--accent)', flex: '0 1 140px', maxWidth: 160 }} title={issue.key}>{issue.key}</span>
+                <span className="scroll-row__grow" style={{ fontSize: 13, color: 'var(--text-secondary)' }} title={issue.summary}>
                   {issue.summary}
                 </span>
                 {issue.issueStatus?.name && (
@@ -1116,14 +1116,14 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
       {variables.length > 0 && (
         <div>
           <SectionTitle><FileText size={12} /> Deployment Configuration ({variables.length})</SectionTitle>
-          <div className="card-surface" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.03em', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="card-surface" style={{ padding: 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 180px) minmax(0, 1fr)', fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.03em', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
               <span>Name</span><span>Value</span>
             </div>
             {variables.map((v, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '180px 1fr', padding: '7px 16px', borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-quaternary)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={v.name}>{v.name}</span>
-                <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-all', fontSize: 12 }}>{v.value}</span>
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 180px) minmax(0, 1fr)', padding: '7px 16px', borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none', fontSize: 13 }}>
+                <span className="truncate" style={{ color: 'var(--text-quaternary)', fontWeight: 500 }} title={v.name}>{v.name}</span>
+                <span style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', wordBreak: 'break-word', overflowWrap: 'anywhere', fontSize: 12, minWidth: 0 }}>{v.value}</span>
               </div>
             ))}
           </div>
@@ -1134,9 +1134,9 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
           <SectionTitle><Box size={12} /> Artifacts ({artifacts.length})</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {artifacts.map((a, i) => (
-              <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div key={i} className="card-surface scroll-row" style={{ padding: '10px 14px', gap: 12 }}>
                 <Box size={14} style={{ color: 'var(--text-quaternary)', flexShrink: 0 }} />
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.name}>{a.name}</span>
+                <span className="scroll-row__grow" style={{ fontSize: 13, color: 'var(--text-secondary)' }} title={a.name}>{a.name}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-quaternary)', flexShrink: 0, fontFamily: 'monospace' }}>
                   {a.size != null ? `${(a.size / 1024).toFixed(1)} KB` : ''}
                 </span>
@@ -1244,21 +1244,19 @@ function ErrorLogViewer({ buildResultKey }: { buildResultKey: string }) {
 
   useEffect(() => {
     if (showLog && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      logEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
   }, [showLog, fullLog])
 
   if (loading) return <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>Loading build log...</div>
   if (!fullLog) return <div style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>No log data available</div>
 
-  // Extract summary info from log
   const lines = fullLog.split('\n')
   const errorLines = lines.filter((l) => /ERROR|FAILURE|FAILED|Exception|BUILD FAILURE|exit code [1-9]/i.test(l))
   const warningLines = lines.filter((l) => /WARN(?:ING)?[:\s]/i.test(l))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Summary strip */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -1288,11 +1286,10 @@ function ErrorLogViewer({ buildResultKey }: { buildResultKey: string }) {
         </button>
       </div>
 
-      {/* Inline error summary */}
       {errorLines.length > 0 && (
         <div style={{
           background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.15)',
-          borderRadius: 'var(--radius-md)', padding: '12px 16px',
+          borderRadius: 'var(--radius-md)', padding: '12px 16px', minWidth: 0,
         }}>
           <div style={{ fontSize: 11, fontWeight: 510, color: 'var(--error)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Error Summary
@@ -1300,7 +1297,7 @@ function ErrorLogViewer({ buildResultKey }: { buildResultKey: string }) {
           {errorLines.slice(0, 5).map((line, i) => (
             <div key={i} style={{
               fontSize: 12, fontFamily: 'monospace', color: 'var(--error)', lineHeight: 1.7,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+              whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere',
             }}>
               {line}
             </div>
@@ -1313,27 +1310,26 @@ function ErrorLogViewer({ buildResultKey }: { buildResultKey: string }) {
         </div>
       )}
 
-      {/* Full log viewer */}
       {showLog && (
         <div style={{
           background: 'var(--bg-page)', border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)', padding: 0, overflow: 'hidden',
+          borderRadius: 'var(--radius-md)', padding: 0, overflow: 'hidden', minWidth: 0,
         }}>
           <div style={{
             padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0,
           }}>
-            <span style={{ fontSize: 11, fontWeight: 510, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            <span style={{ fontSize: 11, fontWeight: 510, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>
               Full Build Log
             </span>
-            <span style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>
+            <span className="truncate" style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right' }}>
               Last updated: {new Date().toLocaleString()}
             </span>
           </div>
           <div style={{
             padding: '12px 16px', fontSize: 11, fontFamily: 'monospace',
-            lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-            maxHeight: 500, overflow: 'auto', color: 'var(--text-secondary)',
+            lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere',
+            color: 'var(--text-secondary)', overscrollBehavior: 'contain',
           }}>
             {lines.map((line, i) => {
               let bgColor = 'transparent'
@@ -1368,7 +1364,7 @@ function InfoCard({ icon: Icon, label, value }: { icon: any; label: string; valu
       <div style={{ fontSize: 11, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
         <Icon size={10} /> {label}
       </div>
-      <div style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }}>{value}</div>
+      <div style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{value}</div>
     </div>
   )
 }
@@ -1454,7 +1450,7 @@ function HistoryTab({
             onMouseEnter={(e) => { if (!isCurrent) e.currentTarget.style.background = 'var(--bg-elevated)' }}
             onMouseLeave={(e) => { e.currentTarget.style.background = '' }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} className="scroll-row">
               <StatusBadge status={statusBadgeKey(r)} />
               {running && (
                 <span style={{
@@ -1467,22 +1463,30 @@ function HistoryTab({
                   {t('status.in_progress')}
                 </span>
               )}
-              <span style={{
-                fontSize: 13, fontWeight: 510, color: 'var(--accent)',
-                fontFamily: 'monospace', minWidth: 160,
-              }}>
+              <span
+                className="scroll-row__meta"
+                style={{
+                  fontSize: 13, fontWeight: 510, color: 'var(--accent)',
+                  fontFamily: 'monospace', flex: '0 1 auto', maxWidth: '40%',
+                }}
+                title={r.buildResultKey}
+              >
                 {r.buildResultKey}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--text-tertiary)', minWidth: 60 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0 }}>
                 {duration}
               </span>
               <span
-                style={{ fontSize: 12, color: 'var(--text-quaternary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                className="scroll-row__grow"
+                style={{ fontSize: 12, color: 'var(--text-quaternary)' }}
                 title={r.reason}
               >
                 {r.reason || '—'}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--text-quaternary)', minWidth: 140, textAlign: 'right', flexShrink: 0 }}>
+              <span
+                className="scroll-row__meta"
+                style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right', flex: '0 1 140px', maxWidth: 160 }}
+              >
                 {r.startTime ? new Date(r.startTime).toLocaleString() : '—'}
               </span>
             </div>
@@ -1760,7 +1764,7 @@ function DeploymentsTab({
                   transition: 'background 0.15s ease',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div className="scroll-row" style={{ gap: 10, flexWrap: 'wrap', overflow: 'visible' }}>
                   <StatusBadge status={statusBadgeKey(r)} />
                   {running && (
                     <span style={{
@@ -1775,27 +1779,26 @@ function DeploymentsTab({
                   )}
                   <span style={{
                     fontSize: 13, fontWeight: 510, color: 'var(--accent)',
-                    fontFamily: 'monospace', minWidth: 64, flexShrink: 0,
+                    fontFamily: 'monospace', flexShrink: 0,
                   }}>
                     #{r.buildNumber ?? '?'}
                   </span>
                   <span
-                    style={{
-                      fontSize: 12, color: 'var(--text-secondary)', flex: 1, minWidth: 120,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}
+                    className="scroll-row__grow"
+                    style={{ fontSize: 12, color: 'var(--text-secondary)', flex: '1 1 120px' }}
                     title={r.reason}
                   >
                     {r.reason || '—'}
                   </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)', minWidth: 50, flexShrink: 0, fontFamily: 'monospace' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flexShrink: 0, fontFamily: 'monospace' }}>
                     {duration}
                   </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-quaternary)', minWidth: 130, textAlign: 'right', flexShrink: 0 }}>
+                  <span
+                    className="scroll-row__meta"
+                    style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right', flex: '0 1 130px', maxWidth: 150 }}
+                  >
                     {r.startTime ? new Date(r.startTime).toLocaleString() : '—'}
                   </span>
-
-                  {/* 中断按钮 —— 仅运行中的部署可中断 */}
                   {running && (
                     <button
                       onClick={() => void handleStop(r.buildResultKey)}
@@ -1814,8 +1817,6 @@ function DeploymentsTab({
                       <Ban size={11} /> {actingKey === r.buildResultKey ? '…' : t('deploy.stop')}
                     </button>
                   )}
-
-                  {/* 重试按钮 —— 仅失败/中断的部署可重试 */}
                   {canRetry && !running && (
                     <button
                       onClick={() => void handleRetry()}
@@ -1834,8 +1835,6 @@ function DeploymentsTab({
                       <RotateCw size={11} /> {actingKey === 'retry' ? '…' : t('deploy.retry')}
                     </button>
                   )}
-
-                  {/* 查看详情 —— 跳转到该构建的详情页 */}
                   <button
                     onClick={() => !isCurrent && onNavigate(r.buildResultKey)}
                     disabled={isCurrent}

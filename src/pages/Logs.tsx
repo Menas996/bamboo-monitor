@@ -83,12 +83,12 @@ export default function Logs() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 16, flexShrink: 0, gap: 12, minWidth: 0, flexWrap: 'wrap',
       }}>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h1 style={{ fontSize: 20, fontWeight: 510, color: 'var(--text-primary)', letterSpacing: '-0.24px' }}>
             {t('logs.title')}
           </h1>
@@ -96,7 +96,7 @@ export default function Logs() {
             {logs.length} {t('logs.entries')}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
           <label style={{
             display: 'flex', alignItems: 'center', gap: 6,
             fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer',
@@ -149,8 +149,8 @@ export default function Logs() {
           </div>
         ) : (
           paginatedLogs.map((log, i) => (
-            <div key={i} style={{
-              display: 'flex', gap: 8, padding: '4px 12px',
+            <div key={i} className="scroll-row" style={{
+              gap: 8, padding: '4px 12px',
               borderBottom: '1px solid var(--border-subtle)', alignItems: 'flex-start',
             }}>
               <span style={{ color: 'var(--text-quaternary)', flexShrink: 0, width: 80 }}>
@@ -167,7 +167,7 @@ export default function Logs() {
                   {log.duration}ms
                 </span>
               )}
-              <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-all' }}>
+              <span style={{ color: 'var(--text-secondary)', flex: '1 1 0%', minWidth: 0, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
                 {log.message}
               </span>
             </div>

@@ -365,13 +365,14 @@ export default function Dashboard() {
     <div style={{ display: 'flex', gap: 24, height: '100%', overflow: 'hidden' }}>
       <div style={{
         width: 260, flexShrink: 0, overflow: 'auto',
-        borderRight: '1px solid var(--border-subtle)', paddingRight: 16,
+        borderRight: '1px solid var(--border-subtle)',
+        padding: '4px 16px 8px 4px',
         minWidth: 0,
       }}>
         <div style={{ position: 'relative', marginBottom: 12 }}>
           <Search size={14} style={{
             position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-            color: 'var(--text-quaternary)',
+            color: 'var(--text-quaternary)', pointerEvents: 'none',
           }} />
           <input
             className="input-linear"
@@ -421,7 +422,7 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
+      <div style={{ flex: 1, overflow: 'auto', minWidth: 0, padding: '4px' }}>
         <div style={{
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
           marginBottom: 16, gap: 16, flexWrap: 'wrap',
@@ -433,7 +434,7 @@ export default function Dashboard() {
             }}>
               {t('dashboard.title')}
             </h1>
-            <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4, whiteSpace: 'nowrap' }}>
+            <p className="truncate" style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
               {favorites.length} {t('dashboard.favorites_polling')}
             </p>
           </div>
