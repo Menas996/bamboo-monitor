@@ -3,7 +3,7 @@ import { useI18n } from '../lib/i18n'
 import { useNavigate } from './routes'
 import StatusBadge from '../components/StatusBadge'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { normalizePlanResults, pickPlanBuildResult, isBuildRunning, buildNumberFromResultKey } from '../lib/bamboo-build'
+import { normalizePlanResults, pickPlanBuildResult, isBuildRunning, buildNumberFromResultKey, statusBadgeKey } from '../lib/bamboo-build'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { BarChart3 } from 'lucide-react'
 
@@ -22,7 +22,7 @@ interface PlanSnapshot {
 
 interface TimelineEvent {
   key: string; planName: string; planKey: string
-  buildNumber: number; buildState: string
+  buildNumber: number; buildState: string; lifeCycleState?: string
   startTime?: number; duration?: number
 }
 
@@ -41,6 +41,7 @@ const STATUS_COLORS: Record<string, string> = {
   Failed: CHART_COLORS.failed,
   Unknown: CHART_COLORS.muted,
   'In Progress': CHART_COLORS.blue,
+  Stopped: CHART_COLORS.muted,
 }
 
 const tooltipStyle = {
@@ -132,6 +133,7 @@ export default function Overview() {
               key: r.buildResultKey, planName: fav.planName, planKey: fav.planKey,
               buildNumber: r.buildNumber ?? buildNumberFromResultKey(r.buildResultKey, fav.planKey),
               buildState: r.buildState ?? 'Unknown',
+              lifeCycleState: r.lifeCycleState ?? '',
               startTime: rawItem.startTime,
               duration: rawItem.buildDurationInSeconds ?? (rawItem.buildDuration ? Math.round(rawItem.buildDuration / 1000) : undefined),
             })
@@ -153,9 +155,12 @@ export default function Overview() {
   const statusData = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const s of snapshots) {
-      const label = s.buildState === 'Successful' ? 'Successful'
-        : s.buildState === 'Failed' ? 'Failed'
-        : s.isRunning ? 'In Progress' : 'Unknown'
+      const kind = statusBadgeKey(s)
+      const label = kind === 'Successful' || kind === 'SUCCESS' || kind === 'SUCCESSFUL' ? 'Successful'
+        : kind === 'Failed' || kind === 'FAILED' || kind === 'FAILURE' ? 'Failed'
+        : kind === 'InProgress' || kind === 'Queued' ? 'In Progress'
+        : kind === 'Cancelled' ? 'Stopped'
+        : 'Unknown'
       counts[label] = (counts[label] || 0) + 1
     }
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
@@ -223,7 +228,7 @@ export default function Overview() {
                       fontSize: 13, fontWeight: 510, color: 'var(--text-primary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1,
                     }} title={s.planName}>{s.planName}</span>
-                    <StatusBadge status={s.isRunning ? 'InProgress' : s.buildState} />
+                    <StatusBadge status={statusBadgeKey(s)} />
                   </div>
                   <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-tertiary)' }}>
                     <span style={{ fontFamily: 'monospace' }}>#{s.buildNumber}</span>
@@ -263,7 +268,7 @@ export default function Overview() {
                   <span style={{ fontSize: 11, color: 'var(--text-quaternary)', fontFamily: 'monospace', flexShrink: 0 }}>
                     #{e.buildNumber}
                   </span>
-                  <StatusBadge status={e.buildState === 'Successful' ? 'SUCCESS' : e.buildState === 'Failed' ? 'FAILED' : e.buildState} />
+                  <StatusBadge status={statusBadgeKey(e)} />
                   {e.duration && (
                     <span style={{ fontSize: 11, color: 'var(--text-quaternary)', width: 50, textAlign: 'right', flexShrink: 0 }}>
                       {e.duration > 60 ? `${Math.floor(e.duration / 60)}m${e.duration % 60}s` : `${e.duration}s`}

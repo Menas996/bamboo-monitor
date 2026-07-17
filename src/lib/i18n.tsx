@@ -89,6 +89,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // Status
     'status.success': '成功',
     'status.failed': '失败',
+    'status.cancelled': '已中断',
     'status.unknown': '未知',
     'status.in_progress': '进行中',
     'status.queued': '排队中',
@@ -262,6 +263,7 @@ const translations: Record<Locale, Record<string, string>> = {
     // Status
     'status.success': 'Success',
     'status.failed': 'Failed',
+    'status.cancelled': 'Stopped',
     'status.unknown': 'Unknown',
     'status.in_progress': 'In Progress',
     'status.queued': 'Queued',

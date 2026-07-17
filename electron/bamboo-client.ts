@@ -134,19 +134,21 @@ function mergeBuildResultsByKey(...groups: BambooBuildResult[][]): BambooBuildRe
   return [...byKey.values()].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
 }
 
-const TERMINAL_BUILD_STATES = new Set(['SUCCESSFUL', 'SUCCESS', 'FAILED', 'FAILURE', 'CANCELLED'])
+const TERMINAL_BUILD_STATES = new Set([
+  'SUCCESSFUL', 'SUCCESS', 'FAILED', 'FAILURE', 'CANCELLED', 'CANCELED',
+  'NOTBUILT', 'INCOMPLETE', 'STOPPED',
+])
 
 export function pickLatestPlanBuild(results: BambooBuildResult[]): BambooBuildResult | null {
   if (results.length === 0) return null
   const sorted = [...results].sort((a, b) => (b.buildNumber ?? 0) - (a.buildNumber ?? 0))
   for (const r of sorted) {
     const life = (r.lifeCycleState ?? '').toUpperCase().replace(/[\s_-]+/g, '')
-    if (life === 'FINISHED') continue
+    if (life === 'FINISHED' || life === 'NOTBUILT') continue
     if (life === 'INPROGRESS' || life === 'QUEUED' || life === 'PENDING') return r
-    const st = (r.buildState ?? '').toUpperCase()
-    if (st === 'NOT_BUILT' || st === 'NOTBUILT') return r
-    if (!st || st === 'UNKNOWN' || st === 'INPROGRESS' || st === 'RUNNING') return r
-    if (!TERMINAL_BUILD_STATES.has(st)) return r
+    const st = (r.buildState ?? '').toUpperCase().replace(/[\s_-]+/g, '')
+    if (TERMINAL_BUILD_STATES.has(st)) continue
+    if (st === 'INPROGRESS' || st === 'RUNNING') return r
   }
   return sorted[0] ?? null
 }

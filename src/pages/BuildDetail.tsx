@@ -4,11 +4,12 @@ import { useNavigate, useGoBack } from './routes'
 import {
   collectChanges, isBuildRunning, shouldShowDeployProgress, computeDeployProgress, asArray,
   normalizePlanResults, pickPlanBuildResult, pickFallbackBuildForDelete,
-  buildNumberFromResultKey,
+  buildNumberFromResultKey, statusBadgeKey, isCancelledOrStopped,
   planKeyFromBuildResultKey, resolveActiveBuildKey,
   type NormalizedChange, type PlanBuildSnapshot,
 } from '../lib/bamboo-build'
 import StatusBadge from '../components/StatusBadge'
+import BuildHistoryStrip from '../components/BuildHistoryStrip'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
   ArrowLeft, GitCommit, Clock, User, Layers, AlertTriangle,
@@ -102,6 +103,8 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [liveSnapshot, setLiveSnapshot] = useState<PlanBuildSnapshot | null>(null)
+  const [stripBuilds, setStripBuilds] = useState<PlanBuildSnapshot[]>([])
+  const [stopping, setStopping] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [transitioning, setTransitioning] = useState(false)
@@ -132,6 +135,32 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   function showMsg(type: 'success' | 'error', text: string) {
     setActionMsg({ type, text })
     setTimeout(() => setActionMsg(null), 4000)
+  }
+
+  async function handleStopCurrent() {
+    setStopping(true)
+    setActionsOpen(false)
+    try {
+      const result = await window.actions.stopBuild(buildResultKey)
+      if (result.success) {
+        showMsg('success', t('deploy.stop_success'))
+        setHistoryRefreshKey((k) => k + 1)
+        try {
+          const raw = await window.bamboo.getPlanResults(planKeyFromBuildResultKey(buildResultKey))
+          setStripBuilds(normalizePlanResults(raw, planKeyFromBuildResultKey(buildResultKey)))
+          const fresh = await window.bamboo.getBuildDetail(buildResultKey)
+          if (fresh) setDetail(fresh)
+        } catch {
+          /* refresh on next poll */
+        }
+      } else {
+        showMsg('error', result.errorMessage || t('deploy.stop_failed'))
+      }
+    } catch {
+      showMsg('error', t('deploy.stop_failed'))
+    } finally {
+      setStopping(false)
+    }
   }
 
   async function handleQueueBuild(variables?: Record<string, string>) {
@@ -327,6 +356,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         const skipKeys = new Set(deletedBuildKeysRef.current)
         if (pendingDelete) skipKeys.add(pendingDelete)
         const list = fullList.filter((r) => !skipKeys.has(r.buildResultKey))
+        if (!cancelled) setStripBuilds(list)
         const pick = pickPlanBuildResult(list)
         const pickRunning = !!(pick && isBuildRunning(pick))
         if (!fetchDetail && prevPickRunningRef.current && !pickRunning && pick?.buildResultKey === buildResultKey) {
@@ -336,12 +366,27 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         if (pendingDelete) {
           activeKey = buildResultKey
         } else {
-          activeKey = resolveActiveBuildKey(buildResultKey, planKey, pick, skipKeys)
-          if (!cancelled) setLiveSnapshot(pick?.buildResultKey === activeKey ? pick : null)
-          if (!cancelled && activeKey !== buildResultKey && !skipKeys.has(activeKey)) {
-            seamlessNavRef.current = true
-            navigate({ page: 'build', buildResultKey: activeKey })
-            return
+          const currentInList = list.find((r) => r.buildResultKey === buildResultKey)
+          const viewingRunning = currentInList
+            ? isBuildRunning(currentInList)
+            : !!(detailRef.current && isBuildRunning(detailRef.current))
+          const shouldFollowActive = viewingRunning && !!pick && isBuildRunning(pick)
+
+          if (shouldFollowActive) {
+            activeKey = resolveActiveBuildKey(buildResultKey, planKey, pick, skipKeys)
+            if (!cancelled) setLiveSnapshot(pick.buildResultKey === activeKey ? pick : null)
+            if (!cancelled && activeKey !== buildResultKey && !skipKeys.has(activeKey)) {
+              seamlessNavRef.current = true
+              navigate({ page: 'build', buildResultKey: activeKey })
+              return
+            }
+          } else {
+            activeKey = buildResultKey
+            if (!cancelled) {
+              setLiveSnapshot(
+                pick?.buildResultKey === buildResultKey && isBuildRunning(pick) ? pick : null
+              )
+            }
           }
         }
       } catch {
@@ -586,7 +631,20 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                 {actionMsg.text}
               </span>
             )}
-            <StatusBadge status={deploying ? 'InProgress' : displayDetail.buildState} />
+            <StatusBadge status={statusBadgeKey(displayDetail)} />
+            {deploying && (
+              <button
+                onClick={() => void handleStopCurrent()}
+                disabled={stopping}
+                className="btn-ghost"
+                style={{
+                  padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13,
+                  color: 'var(--error)', opacity: stopping ? 0.6 : 1,
+                }}
+              >
+                <Ban size={14} /> {stopping ? '…' : t('deploy.stop')}
+              </button>
+            )}
             <div ref={actionsRef} style={{ position: 'relative' }}>
               <button
                 onClick={() => setActionsOpen(!actionsOpen)}
@@ -602,6 +660,14 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                   borderRadius: 'var(--radius-lg)', padding: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                 }}>
                   <DropdownLabel>Build</DropdownLabel>
+                  {deploying && (
+                    <DropdownItem
+                      icon={Ban}
+                      label={t('deploy.stop')}
+                      onClick={() => void handleStopCurrent()}
+                      danger
+                    />
+                  )}
                   <DropdownItem icon={RefreshCw} label="Rerun this build" onClick={() => handleQueueBuild()} />
                   <DropdownItem icon={Play} label="Run plan" onClick={() => handleQueueBuild()} />
                   <DropdownItem icon={Settings} label="Run customized..." onClick={openCustomize} />
@@ -621,6 +687,13 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
             </div>
           </div>
         </div>
+
+        <BuildHistoryStrip
+          builds={stripBuilds}
+          currentKey={buildResultKey}
+          planKey={routePlanKey}
+          onSelect={(key) => navigate({ page: 'build', buildResultKey: key })}
+        />
 
         {deploying && (
           <BuildDeployProgress detail={displayDetail} />
@@ -1382,7 +1455,7 @@ function HistoryTab({
             onMouseLeave={(e) => { e.currentTarget.style.background = '' }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <StatusBadge status={running ? 'InProgress' : (r.buildState ?? 'Unknown')} />
+              <StatusBadge status={statusBadgeKey(r)} />
               {running && (
                 <span style={{
                   fontSize: 10, fontWeight: 510, color: 'var(--accent)',
@@ -1477,8 +1550,9 @@ function DeploymentsTab({
   }
 
   function isFailedOrCancelled(row: DeployHistoryRow): boolean {
+    if (isCancelledOrStopped(row)) return true
     const st = (row.buildState ?? '').toUpperCase()
-    return st === 'FAILED' || st === 'FAILURE' || st === 'CANCELLED'
+    return st === 'FAILED' || st === 'FAILURE'
   }
 
   function isSuccess(row: DeployHistoryRow): boolean {
@@ -1687,7 +1761,7 @@ function DeploymentsTab({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <StatusBadge status={running ? 'InProgress' : (r.buildState ?? 'Unknown')} />
+                  <StatusBadge status={statusBadgeKey(r)} />
                   {running && (
                     <span style={{
                       fontSize: 10, fontWeight: 510, color: 'var(--accent)',

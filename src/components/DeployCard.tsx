@@ -1,6 +1,7 @@
 import StatusBadge from './StatusBadge'
 import { Star } from 'lucide-react'
 import { useI18n } from '../lib/i18n'
+import { statusBadgeKey } from '../lib/bamboo-build'
 
 interface DeployData {
   buildResultKey?: string
@@ -107,7 +108,10 @@ export default function DeployCard({
           {isDeploying ? (
             <StatusBadge status="InProgress" />
           ) : (
-            <StatusBadge status={result?.state ?? 'UNKNOWN'} />
+            <StatusBadge status={statusBadgeKey({
+              buildState: result?.state ?? result?.deploymentState,
+              lifeCycleState: result?.state,
+            })} />
           )}
         </div>
       </div>

@@ -6,20 +6,26 @@ interface Props {
 
 export default function StatusBadge({ status }: Props) {
   const { t } = useI18n()
+  const normalized = (status ?? '').toUpperCase().replace(/[\s_-]+/g, '')
 
   const STATUS_MAP: Record<string, { bg: string; color: string; labelKey: string }> = {
     SUCCESS: { bg: 'rgba(39, 166, 68, 0.15)', color: 'var(--success)', labelKey: 'status.success' },
-    Successful: { bg: 'rgba(39, 166, 68, 0.15)', color: 'var(--success)', labelKey: 'status.success' },
+    SUCCESSFUL: { bg: 'rgba(39, 166, 68, 0.15)', color: 'var(--success)', labelKey: 'status.success' },
     FAILED: { bg: 'rgba(239, 68, 68, 0.15)', color: 'var(--error)', labelKey: 'status.failed' },
-    Failed: { bg: 'rgba(239, 68, 68, 0.15)', color: 'var(--error)', labelKey: 'status.failed' },
+    FAILURE: { bg: 'rgba(239, 68, 68, 0.15)', color: 'var(--error)', labelKey: 'status.failed' },
+    CANCELLED: { bg: 'rgba(148, 163, 184, 0.2)', color: '#94a3b8', labelKey: 'status.cancelled' },
+    CANCELED: { bg: 'rgba(148, 163, 184, 0.2)', color: '#94a3b8', labelKey: 'status.cancelled' },
+    NOTBUILT: { bg: 'rgba(148, 163, 184, 0.2)', color: '#94a3b8', labelKey: 'status.cancelled' },
+    INCOMPLETE: { bg: 'rgba(148, 163, 184, 0.2)', color: '#94a3b8', labelKey: 'status.cancelled' },
+    STOPPED: { bg: 'rgba(148, 163, 184, 0.2)', color: '#94a3b8', labelKey: 'status.cancelled' },
     UNKNOWN: { bg: 'rgba(138, 143, 152, 0.15)', color: 'var(--text-tertiary)', labelKey: 'status.unknown' },
-    IN_PROGRESS: { bg: 'rgba(94, 106, 210, 0.15)', color: 'var(--accent)', labelKey: 'status.in_progress' },
-    InProgress: { bg: 'rgba(94, 106, 210, 0.15)', color: 'var(--accent)', labelKey: 'status.in_progress' },
+    INPROGRESS: { bg: 'rgba(94, 106, 210, 0.15)', color: 'var(--accent)', labelKey: 'status.in_progress' },
+    RUNNING: { bg: 'rgba(94, 106, 210, 0.15)', color: 'var(--accent)', labelKey: 'status.in_progress' },
     QUEUED: { bg: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', labelKey: 'status.queued' },
-    Queued: { bg: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', labelKey: 'status.queued' },
+    PENDING: { bg: 'rgba(245, 158, 11, 0.15)', color: 'var(--warning)', labelKey: 'status.queued' },
   }
 
-  const style = STATUS_MAP[status] ?? STATUS_MAP.UNKNOWN
+  const style = STATUS_MAP[normalized] ?? STATUS_MAP.UNKNOWN
 
   return (
     <span style={{

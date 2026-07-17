@@ -24,8 +24,9 @@ let pollCycleInFlight = false
 let gitWatchInFlight: Promise<void> | null = null
 
 function isTerminalState(state: string): boolean {
-  const s = state.toUpperCase()
-  return s === 'SUCCESSFUL' || s === 'SUCCESS' || s === 'FAILED' || s === 'FAILURE' || s === 'CANCELLED' || s === 'NOT_BUILT'
+  const s = state.toUpperCase().replace(/[\s_-]+/g, '')
+  return s === 'SUCCESSFUL' || s === 'SUCCESS' || s === 'FAILED' || s === 'FAILURE'
+    || s === 'CANCELLED' || s === 'CANCELED' || s === 'NOTBUILT' || s === 'INCOMPLETE' || s === 'STOPPED'
 }
 
 function toDeployResult(

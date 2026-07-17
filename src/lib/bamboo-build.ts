@@ -66,6 +66,83 @@ export function collectChanges(detail: Record<string, unknown> | null | undefine
 }
 
 const TERMINAL_BUILD = new Set(['SUCCESSFUL', 'SUCCESS', 'FAILED', 'FAILURE', 'CANCELLED'])
+const STOPPED_BUILD = new Set(['NOTBUILT', 'INCOMPLETE', 'STOPPED'])
+
+export type BuildStatusKind =
+  | 'success'
+  | 'failed'
+  | 'cancelled'
+  | 'queued'
+  | 'running'
+  | 'unknown'
+
+function normalizeLifeToken(s?: string): string {
+  return (s ?? '').toUpperCase().replace(/[\s_-]+/g, '')
+}
+
+export function isTerminalBuildState(buildState?: string): boolean {
+  const token = normalizeLifeToken(buildState)
+  return TERMINAL_BUILD.has(token) || STOPPED_BUILD.has(token)
+}
+
+export function isCancelledOrStopped(detail: {
+  lifeCycleState?: string
+  buildState?: string
+}): boolean {
+  const life = normalizeLifeToken(detail.lifeCycleState)
+  const build = normalizeLifeToken(detail.buildState)
+  if (build === 'CANCELLED' || STOPPED_BUILD.has(build)) return true
+  if (life === 'NOTBUILT') return true
+  return false
+}
+
+export function classifyBuildStatus(detail: {
+  lifeCycleState?: string
+  buildState?: string
+}): BuildStatusKind {
+  const life = normalizeLifeToken(detail.lifeCycleState)
+  const build = normalizeLifeToken(detail.buildState)
+
+  if (build === 'SUCCESSFUL' || build === 'SUCCESS') return 'success'
+  if (build === 'FAILED' || build === 'FAILURE') return 'failed'
+  if (build === 'CANCELLED' || STOPPED_BUILD.has(build) || life === 'NOTBUILT') return 'cancelled'
+  if (life === 'QUEUED' || life === 'PENDING') return 'queued'
+  if (life === 'INPROGRESS' || build === 'INPROGRESS' || build === 'RUNNING') return 'running'
+  if (life === 'FINISHED') {
+    if (!build || build === 'UNKNOWN') return 'cancelled'
+    return 'unknown'
+  }
+  if (!build || build === 'UNKNOWN') return 'unknown'
+  return 'unknown'
+}
+
+export function statusBadgeKey(detail: {
+  lifeCycleState?: string
+  buildState?: string
+}): string {
+  const kind = classifyBuildStatus(detail)
+  if (kind === 'success') return 'Successful'
+  if (kind === 'failed') return 'Failed'
+  if (kind === 'cancelled') return 'Cancelled'
+  if (kind === 'queued') return 'Queued'
+  if (kind === 'running') return 'InProgress'
+  return detail.buildState || 'UNKNOWN'
+}
+
+export function isBuildRunning(detail: {
+  lifeCycleState?: string
+  buildState?: string
+}): boolean {
+  const kind = classifyBuildStatus(detail)
+  return kind === 'running' || kind === 'queued'
+}
+
+export function shouldShowDeployProgress(detail: {
+  lifeCycleState?: string
+  buildState?: string
+}): boolean {
+  return isBuildRunning(detail)
+}
 
 export function planKeyFromBuildResultKey(buildResultKey: string): string {
   const idx = buildResultKey.lastIndexOf('-')
@@ -73,6 +150,22 @@ export function planKeyFromBuildResultKey(buildResultKey: string): string {
   const suffix = buildResultKey.slice(idx + 1)
   if (/^\d+$/.test(suffix)) return buildResultKey.slice(0, idx)
   return buildResultKey
+}
+
+export function buildNumberFromResultKey(buildResultKey: string, planKey?: string): number {
+  if (planKey && buildResultKey.startsWith(`${planKey}-`)) {
+    const n = Number(buildResultKey.slice(planKey.length + 1))
+    if (Number.isFinite(n)) return n
+  }
+  const m = buildResultKey.match(/-(\d+)$/)
+  return m ? Number(m[1]) : 0
+}
+
+export interface PlanBuildSnapshot {
+  buildResultKey: string
+  buildState: string
+  lifeCycleState: string
+  buildNumber?: number
 }
 
 export function resolveActiveBuildKey(
@@ -87,55 +180,6 @@ export function resolveActiveBuildKey(
   const pickBn = pick.buildNumber ?? buildNumberFromResultKey(pick.buildResultKey, planKey)
   if (pickBn >= routeBn) return pick.buildResultKey
   return routeKey
-}
-
-export function buildNumberFromResultKey(buildResultKey: string, planKey?: string): number {
-  if (planKey && buildResultKey.startsWith(`${planKey}-`)) {
-    const n = Number(buildResultKey.slice(planKey.length + 1))
-    if (Number.isFinite(n)) return n
-  }
-  const m = buildResultKey.match(/-(\d+)$/)
-  return m ? Number(m[1]) : 0
-}
-
-function normalizeLifeToken(s?: string): string {
-  return (s ?? '').toUpperCase().replace(/[\s_-]+/g, '')
-}
-
-export interface PlanBuildSnapshot {
-  buildResultKey: string
-  buildState: string
-  lifeCycleState: string
-  buildNumber?: number
-}
-
-export function isTerminalBuildState(buildState?: string): boolean {
-  return TERMINAL_BUILD.has(normalizeLifeToken(buildState))
-}
-
-export function isBuildRunning(detail: {
-  lifeCycleState?: string
-  buildState?: string
-}): boolean {
-  if (isTerminalBuildState(detail.buildState)) return false
-  const life = normalizeLifeToken(detail.lifeCycleState)
-  if (life === 'FINISHED') return false
-  if (life === 'INPROGRESS' || life === 'QUEUED' || life === 'PENDING') return true
-  const build = normalizeLifeToken(detail.buildState)
-  if (build === 'NOTBUILT') return true
-  if (!build || build === 'UNKNOWN' || build === 'INPROGRESS' || build === 'RUNNING') return true
-  return !TERMINAL_BUILD.has(build)
-}
-
-export function shouldShowDeployProgress(detail: {
-  lifeCycleState?: string
-  buildState?: string
-}): boolean {
-  if (isTerminalBuildState(detail.buildState)) return false
-  const life = normalizeLifeToken(detail.lifeCycleState)
-  if (life === 'FINISHED') return false
-  if (life === 'QUEUED' || life === 'INPROGRESS' || life === 'PENDING') return true
-  return isBuildRunning(detail)
 }
 
 export function extractBuildResultKey(item: Record<string, unknown>, planKey: string): string {
