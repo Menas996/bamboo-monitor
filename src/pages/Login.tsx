@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useI18n } from '../lib/i18n'
 import { useTheme } from '../lib/theme'
 import { Globe, Moon, Sun, Loader2 } from 'lucide-react'
@@ -13,8 +13,24 @@ export default function Login({ onLogin }: Props) {
   const [server, setServer] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    window.config.get('allowInsecureHttp').then((value) => {
+      if (typeof value === 'boolean') setAllowInsecureHttp(value)
+    })
+    window.config.get('server').then((value) => {
+      if (typeof value === 'string' && value) setServer(value)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (server.trim().toLowerCase().startsWith('http://')) {
+      setAllowInsecureHttp(true)
+    }
+  }, [server])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -22,6 +38,7 @@ export default function Login({ onLogin }: Props) {
     setLoading(true)
 
     try {
+      await window.config.set('allowInsecureHttp', allowInsecureHttp)
       const ok = await window.bamboo.login(server, username, password)
       if (ok) {
         onLogin()
@@ -166,6 +183,19 @@ export default function Login({ onLogin }: Props) {
               required
             />
           </div>
+
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 24,
+            fontSize: 12, color: 'var(--text-tertiary)', cursor: 'pointer',
+          }}>
+            <input
+              type="checkbox"
+              checked={allowInsecureHttp}
+              onChange={(e) => setAllowInsecureHttp(e.target.checked)}
+              style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
+            />
+            {t('login.allow_insecure_http')}
+          </label>
 
           {error && (
             <div style={{

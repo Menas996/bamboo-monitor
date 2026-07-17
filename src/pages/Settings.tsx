@@ -88,7 +88,8 @@ export default function Settings() {
   const { t, locale, setLocale } = useI18n()
   const { theme, setTheme } = useTheme()
   const [pollInterval, setPollInterval] = useState(30)
-  const [autoDeployOnGitChange, setAutoDeployOnGitChange] = useState(true)
+  const [autoDeployOnGitChange, setAutoDeployOnGitChange] = useState(false)
+  const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   const [gitRepoMappingsText, setGitRepoMappingsText] = useState('')
   const [saved, setSaved] = useState(false)
   const [activeSection, setActiveSection] = useState<Section>('appearance')
@@ -102,8 +103,11 @@ export default function Settings() {
 
   useEffect(() => {
     window.config.get('pollInterval').then((v) => { if (v) setPollInterval(v) })
-    window.config.get('autoDeployOnGitChange').then((v) => {
-      if (typeof v === 'boolean') setAutoDeployOnGitChange(v)
+    window.config.get('autoDeployOnGitChange').then((value) => {
+      if (typeof value === 'boolean') setAutoDeployOnGitChange(value)
+    })
+    window.config.get('allowInsecureHttp').then((value) => {
+      if (typeof value === 'boolean') setAllowInsecureHttp(value)
     })
     window.config.get('gitRepositoryUrls').then((v) => {
       if (v && typeof v === 'object') {
@@ -162,6 +166,7 @@ export default function Settings() {
   async function handleSave() {
     await window.config.set('pollInterval', pollInterval)
     await window.config.set('autoDeployOnGitChange', autoDeployOnGitChange)
+    await window.config.set('allowInsecureHttp', allowInsecureHttp)
     await window.config.set('gitRepositoryUrls', parseGitRepoMappings(gitRepoMappingsText))
     const favorites = await window.config.get('favoritePlans') as { planKey: string; projectKey: string; planName: string }[] | undefined
     if (favorites?.length) await window.poll.start(pollInterval, favorites)
@@ -292,6 +297,27 @@ export default function Settings() {
                 </label>
                 <div style={{ ...styles.hint, marginLeft: 26 }}>
                   {t('settings.auto_deploy_git.hint')}
+                </div>
+                <div style={{ ...styles.hint, marginLeft: 26, color: 'var(--warning, #f59e0b)' }}>
+                  {t('settings.auto_deploy_git.warning')}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 24 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={allowInsecureHttp}
+                    onChange={(e) => setAllowInsecureHttp(e.target.checked)}
+                    style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+                  />
+                  {t('settings.allow_insecure_http')}
+                </label>
+                <div style={{ ...styles.hint, marginLeft: 26 }}>
+                  {t('settings.allow_insecure_http.hint')}
                 </div>
               </div>
 

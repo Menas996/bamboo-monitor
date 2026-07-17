@@ -4,6 +4,10 @@ import {
   pickPreferredVcsBranch,
 } from './git-remote'
 import Store from 'electron-store'
+import {
+  isStrutsActionSuccess, isSameOriginUrl, isValidBuildResultKey, isValidPlanKey,
+  sanitizeBuildVariables, validateServerUrl,
+} from './lib/security'
 
 const planRepoCache = new Store<{
   planGitRepos: Record<string, { url: string; branch: string }>
@@ -355,11 +359,17 @@ export class BambooClient {
   private auth: string
   private cookies: Record<string, string> = {}
   private authMethod: 'basic' | 'session' | null = null
+  private allowInsecureHttp: boolean
 
-  constructor(server: string, username: string, password: string) {
-    this.baseUrl = server.replace(/\/+$/, '')
+  constructor(server: string, username: string, password: string, options?: { allowInsecureHttp?: boolean }) {
+    const normalized = validateServerUrl(server, options?.allowInsecureHttp ?? false)
+    if (!normalized) {
+      throw new Error('Invalid Bamboo server URL')
+    }
+    this.baseUrl = normalized
     this.username = username
     this.password = password
+    this.allowInsecureHttp = options?.allowInsecureHttp ?? false
     this.auth = 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
     logger.info('AUTH', `Client created for ${this.baseUrl}`, { username })
   }
@@ -494,7 +504,13 @@ export class BambooClient {
       if (loginRes.status >= 300 && loginRes.status < 400) {
         const location = loginRes.headers.get('location')
         if (location) {
-          const finalUrl = location.startsWith('http') ? location : `${this.baseUrl}${location}`
+          const finalUrl = location.startsWith('http')
+            ? location
+            : `${this.baseUrl}${location.startsWith('/') ? location : `/${location}`}`
+          if (!isSameOriginUrl(finalUrl, this.baseUrl)) {
+            logger.warn('AUTH', 'Login redirect blocked: cross-origin', { location })
+            return false
+          }
           const followRes = await fetch(finalUrl, {
             headers: { Cookie: this.getCookieHeader() },
             redirect: 'manual',
@@ -1078,12 +1094,16 @@ export class BambooClient {
   // --- Build Action Methods ---
 
   async queueBuild(planKey: string, variables?: Record<string, string>): Promise<QueueBuildResult> {
+    if (!isValidPlanKey(planKey)) {
+      return { success: false, errorMessage: `Invalid plan key: ${planKey}` }
+    }
+    const safeVariables = sanitizeBuildVariables(variables)
     try {
-      let url = `${this.baseUrl}/rest/api/latest/queue/${planKey}`
+      let url = `${this.baseUrl}/rest/api/latest/queue/${encodeURIComponent(planKey)}`
       const params = new URLSearchParams()
-      if (variables) {
-        for (const [k, v] of Object.entries(variables)) {
-          params.append(`bamboo.variable.${k}`, v)
+      if (safeVariables) {
+        for (const [key, value] of Object.entries(safeVariables)) {
+          params.append(`bamboo.variable.${key}`, value)
         }
       }
       const queryString = params.toString()
@@ -1131,7 +1151,7 @@ export class BambooClient {
       }
     } catch (err: any) {
       logger.error('API', `queueBuild failed: ${err.message}`)
-      return { success: false }
+      return { success: false, errorMessage: err.message }
     }
   }
 
@@ -1149,6 +1169,10 @@ export class BambooClient {
   }
 
   async deleteBuildResult(buildResultKey: string): Promise<boolean> {
+    if (!isValidBuildResultKey(buildResultKey)) {
+      logger.error('API', `deleteBuildResult: invalid key ${buildResultKey}`)
+      return false
+    }
     const parsed = this.parseBuildResultKeyForDelete(buildResultKey)
     if (!parsed) {
       logger.error('API', `deleteBuildResult: invalid key ${buildResultKey}`)
@@ -1172,7 +1196,11 @@ export class BambooClient {
         body: body.toString(),
         redirect: 'manual',
       })
-      const ok = res.status === 302 || res.status === 200 || res.status === 204
+      const ok = isStrutsActionSuccess(
+        res.status,
+        res.headers.get('location'),
+        this.baseUrl
+      )
       logger.info('API', `deleteBuildResult(${buildResultKey}): ${res.status}`, {
         planKey: parsed.planKey,
         buildNumber: parsed.buildNumber,
@@ -1196,6 +1224,10 @@ export class BambooClient {
    * 参考 deleteBuildResult 的实现模式（form post + X-Atlassian-Token: no-check）。
    */
   async stopBuild(buildResultKey: string): Promise<{ success: boolean; errorMessage?: string }> {
+    if (!isValidBuildResultKey(buildResultKey)) {
+      logger.error('API', `stopBuild: invalid key ${buildResultKey}`)
+      return { success: false, errorMessage: `Invalid build result key: ${buildResultKey}` }
+    }
     const parsed = this.parseBuildResultKeyForDelete(buildResultKey)
     if (!parsed) {
       logger.error('API', `stopBuild: invalid key ${buildResultKey}`)
@@ -1225,8 +1257,7 @@ export class BambooClient {
         body: body.toString(),
         redirect: 'manual',
       })
-      // 302 重定向 / 200 / 204 均视为成功（与 deleteBuildResult 一致的成功判定）
-      if (res.status === 302 || res.status === 200 || res.status === 204) {
+      if (isStrutsActionSuccess(res.status, res.headers.get('location'), this.baseUrl)) {
         logger.info('API', `stopBuild(${buildResultKey}): success via stopPlan.action`, {
           planKey, buildNumber, status: res.status,
         })

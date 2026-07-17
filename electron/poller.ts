@@ -4,6 +4,7 @@ import {
 } from './bamboo-client'
 import Store from 'electron-store'
 import { runGitWatchForFavorites, type PlanGitWatchResult } from './plan-git-watch'
+import { logger } from './lib/logger'
 
 export type { FavoritePlan }
 
@@ -105,7 +106,7 @@ export function startPolling(
           lastSeen[planKey] = buildId
         }
       } catch (err) {
-        console.error(`Poll error for plan ${planKey}:`, err)
+        logger.error('POLL', `Poll error for plan ${planKey}`, { error: String(err) })
       }
     }
 

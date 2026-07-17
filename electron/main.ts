@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import Store from 'electron-store'
 import { BambooClient, BambooDeployResult, setGitRepositoryUrlMappings } from './bamboo-client'
@@ -6,6 +6,11 @@ import { startPolling, stopPolling, type FavoritePlan, type PollingOptions } fro
 import { setupTray } from './tray'
 import { getAppIcon, setDockIcon } from './app-icon'
 import { logger } from './lib/logger'
+import { readStoredPassword, writeStoredPassword } from './lib/credentials'
+import {
+  isConfigKeyAllowed, isValidBuildResultKey, isValidPlanKey, isValidProjectKey,
+  isHttpServerUrl, resolveBambooUrl, validateServerUrl,
+} from './lib/security'
 
 const store = new Store<{
   server: string
@@ -17,6 +22,8 @@ const store = new Store<{
   lastSeen: Record<string, number>
   autoDeployOnGitChange: boolean
   gitRepositoryUrls: Record<string, string>
+  allowInsecureHttp: boolean
+  passwordEncrypted?: string
 }>()
 
 const gotTheLock = app.requestSingleInstanceLock()
@@ -35,6 +42,43 @@ if (!gotTheLock) {
   let bamboo: BambooClient | null = null
   const isDev = !!process.env.VITE_DEV_SERVER_URL
 
+  function assertMainSender(event: IpcMainInvokeEvent): boolean {
+    if (!mainWindow) return false
+    return event.sender === mainWindow.webContents
+  }
+
+  function getStoredPassword(): string | undefined {
+    return readStoredPassword(store)
+  }
+
+  function setupNavigationGuards(window: BrowserWindow) {
+    const appOrigin = isDev && process.env.VITE_DEV_SERVER_URL
+      ? new URL(process.env.VITE_DEV_SERVER_URL).origin
+      : 'file://'
+
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          void shell.openExternal(parsed.href)
+        }
+      } catch {
+        /* ignore */
+      }
+      return { action: 'deny' }
+    })
+
+    window.webContents.on('will-navigate', (event, url) => {
+      if (isDev && process.env.VITE_DEV_SERVER_URL) {
+        const devOrigin = new URL(process.env.VITE_DEV_SERVER_URL).origin
+        if (url.startsWith(devOrigin)) return
+      }
+      if (!url.startsWith(appOrigin)) {
+        event.preventDefault()
+      }
+    })
+  }
+
   function createWindow() {
     logger.info('SYSTEM', 'Creating main window', { dev: isDev })
 
@@ -52,6 +96,7 @@ if (!gotTheLock) {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: true,
       },
       show: false,
     })
@@ -61,6 +106,8 @@ if (!gotTheLock) {
     } else {
       mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
     }
+
+    setupNavigationGuards(mainWindow)
 
     mainWindow.once('ready-to-show', () => {
       logger.info('SYSTEM', 'Main window ready')
@@ -155,8 +202,8 @@ if (!gotTheLock) {
 
   function buildPollingOptions(): PollingOptions | undefined {
     const username = store.get('username')
-    const password = store.get('password')
-    const autoDeploy = store.get('autoDeployOnGitChange', true)
+    const password = getStoredPassword()
+    const autoDeploy = store.get('autoDeployOnGitChange', false)
     if (!username || !password || !autoDeploy) {
       return undefined
     }
@@ -184,45 +231,83 @@ if (!gotTheLock) {
     }
   }
 
-  function startMonitoring() {
+  function resolveAllowInsecureHttp(server: string): boolean {
+    const stored = store.get('allowInsecureHttp')
+    if (typeof stored === 'boolean') return stored
+    if (isHttpServerUrl(server)) {
+      store.set('allowInsecureHttp', true)
+      logger.info('AUTH', 'Migrated existing HTTP Bamboo URL: allowInsecureHttp=true')
+      return true
+    }
+    return false
+  }
+
+  function ensureBambooClient(): BambooClient | null {
+    if (bamboo) return bamboo
     const server = store.get('server')
     const username = store.get('username')
-    const password = store.get('password')
-
-    if (server && username && password) {
-      bamboo = new BambooClient(server, username, password)
-      const interval = store.get('pollInterval', 30)
-      const favorites = store.get('favoritePlans', [])
-
-      logger.info('POLL', `Starting poller: ${favorites.length} favorite plans, ${interval}s interval`, {
-        autoDeploy: store.get('autoDeployOnGitChange', true),
-      })
-
-      startPolling(bamboo, favorites, interval, async (newDeploys) => {
-        await notifyNewDeploys(bamboo!, newDeploys)
-        mainWindow?.webContents.send('new-deploys', newDeploys)
-      }, buildPollingOptions())
+    const password = getStoredPassword()
+    if (!server || !username || !password) return null
+    const allowInsecureHttp = resolveAllowInsecureHttp(server)
+    try {
+      bamboo = new BambooClient(server, username, password, { allowInsecureHttp })
+      return bamboo
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      logger.error('AUTH', `Failed to create Bamboo client: ${message}`)
+      bamboo = null
+      return null
     }
+  }
+
+  function startMonitoring() {
+    const client = ensureBambooClient()
+    if (!client) return
+
+    const interval = store.get('pollInterval', 30)
+    const favorites = store.get('favoritePlans', [])
+
+    logger.info('POLL', `Starting poller: ${favorites.length} favorite plans, ${interval}s interval`, {
+      autoDeploy: store.get('autoDeployOnGitChange', false),
+    })
+
+    startPolling(client, favorites, interval, async (newDeploys) => {
+      await notifyNewDeploys(client, newDeploys)
+      mainWindow?.webContents.send('new-deploys', newDeploys)
+    }, buildPollingOptions())
   }
 
   // --- IPC Handlers ---
 
   function registerIPC() {
-    ipcMain.handle('bamboo:login', async (_e, server: string, username: string, password: string) => {
-      logger.operation('login', { server, username })
-      bamboo = new BambooClient(server, username, password)
+    ipcMain.handle('bamboo:login', async (event, server: string, username: string, password: string) => {
+      if (!assertMainSender(event)) return false
+      let allowInsecureHttp = store.get('allowInsecureHttp', false)
+      if (!allowInsecureHttp && isHttpServerUrl(server)) {
+        allowInsecureHttp = true
+        store.set('allowInsecureHttp', true)
+      }
+      const normalizedServer = validateServerUrl(server, allowInsecureHttp)
+      if (!normalizedServer) {
+        logger.warn('AUTH', 'Login rejected: invalid server URL', { server })
+        return false
+      }
+      logger.operation('login', { server: normalizedServer, username })
       try {
+        bamboo = new BambooClient(normalizedServer, username, password, { allowInsecureHttp })
         const valid = await bamboo.validateAuth()
         if (valid) {
-          store.set('server', server)
+          store.set('server', normalizedServer)
           store.set('username', username)
-          store.set('password', password)
+          writeStoredPassword(store, password)
           logger.info('AUTH', 'Login successful')
         } else {
+          bamboo = null
           logger.warn('AUTH', 'Login failed — invalid credentials')
         }
         return valid
       } catch (err: any) {
+        bamboo = null
         logger.error('AUTH', `Login error: ${err.message}`, { stack: err.stack })
         return false
       }
@@ -242,29 +327,39 @@ if (!gotTheLock) {
       }
     })
 
-    ipcMain.handle('bamboo:getDeployments', async (_e, projectKey: string) => {
+    ipcMain.handle('bamboo:getDeployments', async (event, projectKey: string) => {
+      if (!assertMainSender(event) || !isValidProjectKey(projectKey)) {
+        return { ok: false as const, error: 'Invalid request', deploys: [] }
+      }
       logger.operation('fetch-deployments', { projectKey })
       if (!bamboo) {
         logger.warn('API', 'getDeployments called without client')
-        return []
+        return { ok: false as const, error: 'Not connected', deploys: [] }
       }
       try {
-        return await bamboo.getDeployResults(projectKey)
+        const deploys = await bamboo.getDeployResults(projectKey)
+        return { ok: true as const, deploys }
       } catch (err: any) {
         logger.error('API', `getDeployments failed for ${projectKey}: ${err.message}`)
-        return []
+        return { ok: false as const, error: err.message, deploys: [] }
       }
     })
 
     ipcMain.handle(
       'bamboo:getDeploymentsPage',
-      async (_e, projectKey: string, startIndex: number, pageSize: number) => {
-        if (!bamboo) return { deploys: [], hasMore: false }
+      async (event, projectKey: string, startIndex: number, pageSize: number) => {
+        if (!assertMainSender(event) || !isValidProjectKey(projectKey)) {
+          return { ok: false as const, error: 'Invalid request', deploys: [], hasMore: false }
+        }
+        if (!bamboo) {
+          return { ok: false as const, error: 'Not connected', deploys: [], hasMore: false }
+        }
         try {
-          return await bamboo.getDeployResultsPage(projectKey, startIndex, pageSize)
+          const page = await bamboo.getDeployResultsPage(projectKey, startIndex, pageSize)
+          return { ok: true as const, ...page }
         } catch (err: any) {
           logger.error('API', `getDeploymentsPage failed for ${projectKey}: ${err.message}`)
-          return { deploys: [], hasMore: false }
+          return { ok: false as const, error: err.message, deploys: [], hasMore: false }
         }
       }
     )
@@ -366,17 +461,21 @@ if (!gotTheLock) {
       }
     })
 
-    ipcMain.handle('bamboo:queueBuild', async (_e, planKey: string, variables?: Record<string, string>) => {
-      if (!bamboo) return false
+    ipcMain.handle('bamboo:queueBuild', async (event, planKey: string, variables?: Record<string, string>) => {
+      if (!assertMainSender(event) || !isValidPlanKey(planKey)) {
+        return { success: false, errorMessage: 'Invalid plan key' }
+      }
+      if (!bamboo) return { success: false, errorMessage: 'Not connected' }
       try {
         return await bamboo.queueBuild(planKey, variables)
       } catch (err: any) {
         logger.error('API', `queueBuild failed for ${planKey}: ${err.message}`)
-        return false
+        return { success: false, errorMessage: err.message }
       }
     })
 
-    ipcMain.handle('bamboo:deleteBuildResult', async (_e, buildResultKey: string) => {
+    ipcMain.handle('bamboo:deleteBuildResult', async (event, buildResultKey: string) => {
+      if (!assertMainSender(event) || !isValidBuildResultKey(buildResultKey)) return false
       if (!bamboo) return false
       try {
         return await bamboo.deleteBuildResult(buildResultKey)
@@ -386,7 +485,10 @@ if (!gotTheLock) {
       }
     })
 
-    ipcMain.handle('bamboo:stopBuild', async (_e, buildResultKey: string) => {
+    ipcMain.handle('bamboo:stopBuild', async (event, buildResultKey: string) => {
+      if (!assertMainSender(event) || !isValidBuildResultKey(buildResultKey)) {
+        return { success: false, errorMessage: 'Invalid build result key' }
+      }
       logger.operation('stop-build', { buildResultKey })
       if (!bamboo) return { success: false, errorMessage: 'Not connected' }
       try {
@@ -397,17 +499,26 @@ if (!gotTheLock) {
       }
     })
 
-    ipcMain.handle('bamboo:openUrl', async (_e, path: string) => {
-      if (!bamboo) return
-      const url = bamboo.getServerUrl() + path
-      await shell.openExternal(url)
+    ipcMain.handle('bamboo:openUrl', async (event, urlPath: string) => {
+      if (!assertMainSender(event) || !bamboo) return
+      const resolved = resolveBambooUrl(bamboo.getServerUrl(), urlPath)
+      if (!resolved) {
+        logger.warn('IPC', 'openUrl blocked', { path: urlPath })
+        return
+      }
+      await shell.openExternal(resolved)
     })
 
-    ipcMain.handle('config:get', async (_e, key: string) => {
+    ipcMain.handle('config:get', async (event, key: string) => {
+      if (!assertMainSender(event) || !isConfigKeyAllowed(key)) return undefined
       return store.get(key as any)
     })
 
-    ipcMain.handle('config:set', async (_e, key: string, value: unknown) => {
+    ipcMain.handle('config:set', async (event, key: string, value: unknown) => {
+      if (!assertMainSender(event) || !isConfigKeyAllowed(key)) {
+        logger.warn('CONFIG', 'config:set blocked', { key })
+        return
+      }
       logger.operation('config-set', { key })
       store.set(key as any, value)
       if (key === 'gitRepositoryUrls' && value && typeof value === 'object') {
@@ -477,7 +588,7 @@ if (!gotTheLock) {
     ipcMain.handle('health:check', async () => {
       const server = store.get('server') as string | undefined
       const username = store.get('username') as string | undefined
-      const password = store.get('password') as string | undefined
+      const password = getStoredPassword()
       const baseUrl = server?.replace(/\/+$/, '') ?? ''
 
       const checks: Record<string, { status: string; detail?: string; latency?: number }> = {}
@@ -503,11 +614,12 @@ if (!gotTheLock) {
         checks.connectivity = { status: 'not-configured' }
       }
 
-      // API auth — reuse Bamboo client (normalized base URL + basic/session auth)
-      if (bamboo) {
+      // API auth — must use the same BambooClient as the rest of the app
+      const client = bamboo ?? ensureBambooClient()
+      if (client) {
         const start = performance.now()
         try {
-          await bamboo.getProjects()
+          await client.getProjects()
           checks.api = {
             status: 'ok',
             detail: 'REST API OK',
@@ -523,23 +635,11 @@ if (!gotTheLock) {
           }
         }
       } else if (baseUrl && username && password) {
-        const start = performance.now()
-        const url = `${baseUrl}/rest/api/latest/project`
-        try {
-          const res = await fetch(url, {
-            headers: {
-              Authorization: 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64'),
-              Accept: 'application/json',
-            },
-            signal: AbortSignal.timeout(5000),
-          })
-          checks.api = {
-            status: res.ok ? 'ok' : (res.status === 401 || res.status === 403 ? 'auth-failed' : 'error'),
-            detail: `HTTP ${res.status}`,
-            latency: Math.round(performance.now() - start),
-          }
-        } catch (err: any) {
-          checks.api = { status: 'error', detail: err.message }
+        checks.api = {
+          status: 'error',
+          detail: isHttpServerUrl(baseUrl)
+            ? 'HTTP Bamboo URL blocked — enable “Allow insecure HTTP” in Settings or Login'
+            : 'Bamboo client unavailable',
         }
       } else {
         checks.api = { status: 'not-configured' }
@@ -576,6 +676,10 @@ if (!gotTheLock) {
     })
 
     setDockIcon()
+    const legacyPassword = store.get('password')
+    if (legacyPassword && typeof legacyPassword === 'string') {
+      writeStoredPassword(store, legacyPassword)
+    }
     const gitUrls = store.get('gitRepositoryUrls', {}) as Record<string, string>
     if (gitUrls && typeof gitUrls === 'object' && Object.keys(gitUrls).length > 0) {
       setGitRepositoryUrlMappings(gitUrls)

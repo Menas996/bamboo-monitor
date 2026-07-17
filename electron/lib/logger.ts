@@ -244,11 +244,12 @@ class Logger {
 
   // Read archived log files
   readLogFile(filename: string): string {
-    const filePath = path.join(this.logDir, filename)
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath, 'utf-8')
-    }
-    return ''
+    if (typeof filename !== 'string' || !/^[a-zA-Z0-9._-]+\.log$/.test(filename)) return ''
+    const base = path.resolve(this.logDir)
+    const target = path.resolve(this.logDir, path.basename(filename))
+    if (!target.startsWith(base + path.sep)) return ''
+    if (!fs.existsSync(target)) return ''
+    return fs.readFileSync(target, 'utf-8')
   }
 
   listLogFiles(): string[] {

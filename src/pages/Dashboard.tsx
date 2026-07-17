@@ -92,6 +92,7 @@ export default function Dashboard() {
   const [deployHasMore, setDeployHasMore] = useState(false)
   const [deployFetchOffset, setDeployFetchOffset] = useState(0)
   const [deployLoadingMore, setDeployLoadingMore] = useState(false)
+  const [deployError, setDeployError] = useState<string | null>(null)
   const enrichedKeysRef = useRef(new Set<string>())
 
   useEffect(() => {
@@ -116,6 +117,7 @@ export default function Dashboard() {
       setDeployLoading(false)
       setDeployHasMore(false)
       setDeployFetchOffset(0)
+      setDeployError(null)
       enrichedKeysRef.current.clear()
       return
     }
@@ -127,15 +129,22 @@ export default function Dashboard() {
       setDeployLoading(true)
       setDeployHasMore(false)
       setDeployFetchOffset(0)
+      setDeployError(null)
       try {
-        const { deploys: page, hasMore } = await window.bamboo.getDeploymentsPage(
+        const result = await window.bamboo.getDeploymentsPage(
           selectedProject!,
           0,
           DEPLOY_FETCH_PAGE
         )
         if (cancelled) return
-        setDeploys(dedupeDeploysByPlan(page ?? []))
-        setDeployHasMore(hasMore)
+        if (!result.ok) {
+          setDeployError(result.error)
+          setDeploys([])
+          setDeployHasMore(false)
+          return
+        }
+        setDeploys(dedupeDeploysByPlan(result.deploys ?? []))
+        setDeployHasMore(result.hasMore)
         setDeployFetchOffset(DEPLOY_FETCH_PAGE)
         setDeployPage(0)
       } finally {
@@ -151,13 +160,17 @@ export default function Dashboard() {
     setDeployLoadingMore(true)
     const startIndex = deployFetchOffset
     try {
-      const { deploys: page, hasMore } = await window.bamboo.getDeploymentsPage(
+      const result = await window.bamboo.getDeploymentsPage(
         selectedProject,
         startIndex,
         DEPLOY_FETCH_PAGE
       )
-      setDeploys((prev) => dedupeDeploysByPlan([...prev, ...(page ?? [])]))
-      setDeployHasMore(hasMore)
+      if (!result.ok) {
+        setDeployError(result.error)
+        return
+      }
+      setDeploys((prev) => dedupeDeploysByPlan([...prev, ...(result.deploys ?? [])]))
+      setDeployHasMore(result.hasMore)
       setDeployFetchOffset(startIndex + DEPLOY_FETCH_PAGE)
     } finally {
       setDeployLoadingMore(false)
@@ -243,8 +256,9 @@ export default function Dashboard() {
     if (pick?.buildResultKey) return pick.buildResultKey
 
     try {
-      const deploys = await window.bamboo.getDeployments(fav.projectKey)
-      const matches = dedupeDeploysByPlan(deploys ?? []).filter(
+      const result = await window.bamboo.getDeployments(fav.projectKey)
+      if (!result.ok) return fav.lastBuildResultKey ?? null
+      const matches = dedupeDeploysByPlan(result.deploys ?? []).filter(
         (d: DeployData) => (d.plan?.key ?? d.environment.key) === fav.planKey && d.buildResultKey
       )
       if (matches[0]?.buildResultKey) return matches[0].buildResultKey!
@@ -488,6 +502,11 @@ export default function Dashboard() {
 
             {deployLoading ? (
               <LoadingSpinner text={t('app.loading')} />
+            ) : deployError ? (
+              <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--error)' }}>
+                <div style={{ fontSize: 14 }}>{t('dashboard.deploy_load_error')}</div>
+                <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text-quaternary)' }}>{deployError}</div>
+              </div>
             ) : !selectedProject ? (
               <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-quaternary)' }}>
                 <div style={{ fontSize: 14 }}>{t('dashboard.select_project')}</div>
@@ -499,6 +518,9 @@ export default function Dashboard() {
               </div>
             ) : (
               <>
+                <p style={{ fontSize: 12, color: 'var(--text-quaternary)', marginBottom: 12 }}>
+                  {t('dashboard.deploy_latest_per_plan')}
+                </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {paginatedDeploys.map((d, i) => {
                     const fav = selectedProject ? deployToFavorite(d, selectedProject) : null

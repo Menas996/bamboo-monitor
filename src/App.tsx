@@ -7,7 +7,7 @@ import TitleBar from './components/TitleBar'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import BuildDetail from './pages/BuildDetail'
-import { NavigationProvider, useRoute } from './pages/routes'
+import { NavigationProvider, useRoute, useNavigate } from './pages/routes'
 import Settings from './pages/Settings'
 import Logs from './pages/Logs'
 import Health from './pages/Health'
@@ -19,8 +19,10 @@ declare global {
     bamboo: {
       login: (server: string, username: string, password: string) => Promise<boolean>
       getProjects: () => Promise<any[]>
-      getDeployments: (projectKey: string) => Promise<any[]>
-      getDeploymentsPage: (projectKey: string, startIndex: number, pageSize: number) => Promise<{ deploys: any[]; hasMore: boolean }>
+      getDeployments: (projectKey: string) => Promise<{ ok: boolean; deploys: any[]; error?: string }>
+      getDeploymentsPage: (projectKey: string, startIndex: number, pageSize: number) => Promise<
+        { ok: true; deploys: any[]; hasMore: boolean } | { ok: false; error: string; deploys: any[]; hasMore: boolean }
+      >
       enrichDeployments: (projectKey: string, buildResultKeys: string[]) => Promise<any[]>
       getBuildLog: (buildResultKey: string) => Promise<string | null>
       getFullBuildLog: (buildResultKey: string) => Promise<string | null>
@@ -71,14 +73,26 @@ export default function App() {
 
   useEffect(() => {
     rendererLog.info('SYSTEM', 'App initializing')
-    window.config.get('server').then((server) => {
-      if (server) {
-        setLoggedIn(true)
-        rendererLog.info('AUTH', 'Auto-login from stored config')
+    async function init() {
+      try {
+        const server = await window.config.get('server')
+        if (!server) return
+        const health = await window.health.check()
+        const apiStatus = health?.checks?.api?.status
+        if (apiStatus === 'ok') {
+          setLoggedIn(true)
+          rendererLog.info('AUTH', 'Session validated')
+        } else {
+          rendererLog.warn('AUTH', 'Stored session invalid', { apiStatus })
+        }
+      } catch {
+        rendererLog.warn('AUTH', 'Session validation failed')
+      } finally {
+        setLoading(false)
+        setReady(true)
       }
-      setLoading(false)
-      setReady(true)
-    }).catch(() => { setLoading(false); setReady(true) })
+    }
+    void init()
   }, [])
 
   function handleError(error: Error, errorInfo: any) {
@@ -113,6 +127,21 @@ export default function App() {
 /** Inner component that reads the current route and renders the appropriate page. */
 function AppShell() {
   const route = useRoute()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const deploy = (event as CustomEvent).detail as { buildResultKey?: string } | undefined
+      const buildResultKey = deploy?.buildResultKey
+      if (buildResultKey) {
+        navigate({ page: 'build', buildResultKey })
+      } else {
+        navigate({ page: 'dashboard' })
+      }
+    }
+    window.addEventListener('navigate-to-deploy', handler)
+    return () => window.removeEventListener('navigate-to-deploy', handler)
+  }, [navigate])
 
   return (
     <>

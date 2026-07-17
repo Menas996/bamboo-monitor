@@ -28,6 +28,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'login.connecting': '连接中...',
     'login.error.auth': '认证失败，请检查用户名和密码',
     'login.error.connection': '连接失败，请检查服务器地址',
+    'login.allow_insecure_http': '允许不安全的 HTTP 连接（内网 Bamboo）',
 
     // Dashboard
     'dashboard.title': '构建记录',
@@ -46,6 +47,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.no_favorites': '暂无收藏',
     'dashboard.no_favorites.hint': '在「全部构建」中选择项目，在构建卡片上点击星标收藏',
     'dashboard.no_plans': '无子项目',
+    'dashboard.deploy_load_error': '加载构建记录失败',
+    'dashboard.deploy_latest_per_plan': '每个计划仅显示最新一条构建记录',
     'dashboard.git_auto_deployed': '已自动部署',
     'common.load_more': '加载更多',
     'common.loading_more': '加载中…',
@@ -96,6 +99,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'settings.poll_interval.hint': '检查新构建的频率',
     'settings.auto_deploy_git': 'Git 有新提交时自动部署收藏计划',
     'settings.auto_deploy_git.hint': '轮询时对比远程仓库与最近构建的提交；若有新提交且当前无进行中构建，则自动触发 Bamboo 构建（需本机已安装 git）',
+    'settings.auto_deploy_git.warning': '开启后将在检测到新提交时自动触发构建，请确认生产环境风险',
+    'settings.allow_insecure_http': '允许 HTTP 连接 Bamboo',
+    'settings.allow_insecure_http.hint': '默认仅允许 HTTPS；内网 HTTP Bamboo 需勾选此项',
     'settings.git_repo_mappings': 'Git 仓库地址映射',
     'settings.git_repo_mappings.placeholder': 'Insait-Joy-Web-Test=git@host:org/repo.git\nINTEST-JOYW=git@host:org/repo.git',
     'settings.git_repo_mappings.hint': 'Bamboo REST 无法读取仓库 clone 地址时，请按「仓库名」或「计划 Key」填写一行映射。仓库名可在构建详情的 vcsRevisions 中看到（如 Insait-Joy-Web-Test）。',
@@ -196,6 +202,7 @@ const translations: Record<Locale, Record<string, string>> = {
     'login.connecting': 'Connecting...',
     'login.error.auth': 'Authentication failed. Check your credentials.',
     'login.error.connection': 'Connection failed. Check the server URL.',
+    'login.allow_insecure_http': 'Allow insecure HTTP (on-prem Bamboo)',
 
     // Dashboard
     'dashboard.title': 'Build Results',
@@ -214,6 +221,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.no_favorites': 'No favorites yet',
     'dashboard.no_favorites.hint': 'Under All Builds, select a project and star a build card',
     'dashboard.no_plans': 'No plans',
+    'dashboard.deploy_load_error': 'Failed to load build results',
+    'dashboard.deploy_latest_per_plan': 'Showing the latest build per plan only',
     'dashboard.git_auto_deployed': 'Auto-deployed',
     'common.load_more': 'Load more',
     'common.loading_more': 'Loading…',
@@ -263,6 +272,9 @@ const translations: Record<Locale, Record<string, string>> = {
     'settings.poll_interval.hint': 'How often to check for new builds',
     'settings.auto_deploy_git': 'Auto-deploy favorites when Git has new commits',
     'settings.auto_deploy_git.hint': 'Each poll compares remote HEAD with the last build revision; queues a build when ahead (requires git on PATH)',
+    'settings.auto_deploy_git.warning': 'When enabled, new commits automatically queue builds — confirm production risk',
+    'settings.allow_insecure_http': 'Allow HTTP connections to Bamboo',
+    'settings.allow_insecure_http.hint': 'HTTPS is required by default; enable for on-prem HTTP Bamboo servers',
     'settings.git_repo_mappings': 'Git repository URL mappings',
     'settings.git_repo_mappings.placeholder': 'Insait-Joy-Web-Test=git@host:org/repo.git\nINTEST-JOYW=git@host:org/repo.git',
     'settings.git_repo_mappings.hint': 'When Bamboo REST cannot expose clone URLs, map Bamboo repository name or plan key to a git remote (see repositoryName in build vcsRevisions).',

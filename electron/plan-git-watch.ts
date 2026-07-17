@@ -77,7 +77,7 @@ export async function checkPlanGitUpdates(
     let remoteRevision: string | null = null
 
     if (repo?.url) {
-      remoteRevision = await gitLsRemoteHead(repo.url, repo.branch, auth)
+      remoteRevision = await gitLsRemoteHead(repo.url, repo.branch, auth, client.getServerUrl())
     }
 
     if (!remoteRevision) {

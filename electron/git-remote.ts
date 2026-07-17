@@ -1,6 +1,7 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { logger } from './lib/logger'
+import { shouldInjectGitCredentials } from './lib/security'
 
 const execFileAsync = promisify(execFile)
 
@@ -23,10 +24,14 @@ export function injectGitCredentials(
 export async function gitLsRemoteHead(
   repoUrl: string,
   branch: string,
-  auth?: { username: string; password: string }
+  auth?: { username: string; password: string },
+  bambooServerUrl?: string
 ): Promise<string | null> {
-  const remote = auth?.username
-    ? injectGitCredentials(repoUrl, auth.username, auth.password)
+  const useCredentials = auth?.username
+    && bambooServerUrl
+    && shouldInjectGitCredentials(repoUrl, bambooServerUrl)
+  const remote = useCredentials
+    ? injectGitCredentials(repoUrl, auth!.username, auth!.password)
     : repoUrl
   const ref = branch.startsWith('refs/') ? branch : `refs/heads/${branch}`
 

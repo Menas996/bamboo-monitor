@@ -17,6 +17,17 @@ import {
   Ban, RotateCw, Activity,
 } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { isSafeHttpUrl } from '../lib/safe-url'
+
+function openValidatedLink(href: string) {
+  if (isSafeHttpUrl(href)) {
+    window.open(href, '_blank', 'noopener,noreferrer')
+    return
+  }
+  if (href.startsWith('/')) {
+    void window.actions.openUrl(href)
+  }
+}
 
 const DETAIL_POLL_MS_RUNNING = 5000
 const LIVE_DETAIL_TABS = new Set(['summary', 'stages', 'tests'])
@@ -999,13 +1010,19 @@ function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
                     {issue.issueStatus.name}
                   </span>
                 )}
-                {issue.url && (
-                  <a href={issue.url} target="_blank" rel="noopener noreferrer" style={{
-                    fontSize: 11, color: 'var(--text-quaternary)', textDecoration: 'none',
-                    display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
-                  }} title={issue.url}>
+                {issue.url && (isSafeHttpUrl(issue.url) || issue.url.startsWith('/')) && (
+                  <button
+                    type="button"
+                    onClick={() => openValidatedLink(issue.url)}
+                    style={{
+                      fontSize: 11, color: 'var(--text-quaternary)', textDecoration: 'none',
+                      display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                    }}
+                    title={issue.url}
+                  >
                     <ExternalLink size={11} /> Open
-                  </a>
+                  </button>
                 )}
               </div>
             ))}
@@ -1050,16 +1067,19 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
                 <span style={{ fontSize: 11, color: 'var(--text-quaternary)', flexShrink: 0, fontFamily: 'monospace' }}>
                   {a.size != null ? `${(a.size / 1024).toFixed(1)} KB` : ''}
                 </span>
-                {a.link?.href && (
-                  <a
-                    href={a.link.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: 11, color: 'var(--accent)', textDecoration: 'none', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}
+                {a.link?.href && (isSafeHttpUrl(a.link.href) || a.link.href.startsWith('/')) && (
+                  <button
+                    type="button"
+                    onClick={() => openValidatedLink(a.link.href)}
+                    style={{
+                      fontSize: 11, color: 'var(--accent)', textDecoration: 'none', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
+                      cursor: 'pointer', padding: 0,
+                    }}
                     title={t('build.artifact_download')}
                   >
                     {t('build.artifact_download')}
-                  </a>
+                  </button>
                 )}
               </div>
             ))}
