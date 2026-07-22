@@ -354,6 +354,293 @@ export interface BambooDeployResult {
   deployment?: { id: number; deploymentState: string }
 }
 
+const TASK_FORM_SYSTEM_KEYS = new Set([
+  'atl_token', 'buildKey', 'planKey', 'taskId', 'save', 'create', 'checkBoxFields',
+  'createTaskKey', 'pluginKey', 'decorator', 'confirm', 'bamboo.successReturnMode',
+  'os_destination', 'submit',
+])
+
+const MULTILINE_TASK_FIELDS = new Set([
+  'scriptBody', 'script', 'argument', 'environmentVariables', 'commandLine',
+])
+
+type TaskFieldMeta = {
+  key: string
+  type: 'text' | 'textarea' | 'select' | 'checkbox'
+  options?: { value: string; label: string }[]
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+}
+
+function stripHtmlText(html: string): string {
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+}
+
+function extractTasksFromPlanDetail(planDetail: any): any[] {
+  const out: any[] = []
+  const pushTasks = (raw: any) => {
+    if (!raw) return
+    if (Array.isArray(raw)) out.push(...raw)
+    else out.push(raw)
+  }
+  pushTasks(planDetail?.tasks?.task)
+  const stageArr = planDetail?.stages?.stage
+  const stages = Array.isArray(stageArr) ? stageArr : stageArr ? [stageArr] : []
+  for (const stage of stages) {
+    const jobsRaw = stage?.jobs?.job ?? stage?.plans?.plan
+    const jobs = Array.isArray(jobsRaw) ? jobsRaw : jobsRaw ? [jobsRaw] : []
+    for (const job of jobs) pushTasks(job?.tasks?.task)
+  }
+  return out
+}
+
+function parseTasksFromEditBuildTasksHtml(html: string): any[] {
+  const tasks: any[] = []
+  const seen = new Set<string>()
+  const pushTask = (task: {
+    id: number
+    name?: string
+    description?: string
+    pluginKey?: string
+    disabled?: boolean
+    isFinalising?: boolean
+  }) => {
+    const id = String(task.id)
+    if (seen.has(id)) return
+    if (!task.name && !task.description) return
+    if (task.name && /^(delete\s*task|edit\s*task|×|x)$/i.test(task.name.trim())) return
+    seen.add(id)
+    tasks.push({
+      id: task.id,
+      name: task.name,
+      description: task.description || task.name,
+      userDescription: task.description,
+      pluginKey: task.pluginKey,
+      isEnabled: task.disabled !== true,
+      isFinalising: task.isFinalising === true,
+    })
+  }
+
+  const itemRe = /<li\b([^>]*)>([\s\S]*?)<\/li>/gi
+  let itemMatch: RegExpExecArray | null
+  while ((itemMatch = itemRe.exec(html)) !== null) {
+    const attrs = itemMatch[1]
+    const body = itemMatch[2]
+    const id = attrs.match(/\bid=["']task-(\d+)["']/i)?.[1]
+      || attrs.match(/\bdata-task-id=["'](\d+)["']/i)?.[1]
+      || body.match(/editTask\.action\?[^"'>\s]*\btaskId=(\d+)/i)?.[1]
+    if (!id) continue
+    const titleMatch = body.match(/class=["'][^"']*item-title[^"']*["'][^>]*>([\s\S]*?)<\//i)
+      || body.match(/<h3\b[^>]*>([\s\S]*?)<\/h3>/i)
+    const nameFromTitle = titleMatch ? stripHtmlText(titleMatch[1]) : ''
+    const summaryMatch = body.match(
+      /class=["'][^"']*(?:item-description|task-summary|task-description)[^"']*["'][^>]*>([\s\S]*?)<\//i,
+    )
+    const description = summaryMatch ? stripHtmlText(summaryMatch[1]) : ''
+    const titleLink = body.match(
+      /<a\b[^>]*href=["'][^"']*editTask\.action\?[^"']*taskId=\d+[^"']*["'][^>]*>([\s\S]*?)<\/a>/i,
+    )
+    const nameFromLink = titleLink ? stripHtmlText(titleLink[1]) : ''
+    let name = nameFromTitle || nameFromLink
+    if (name && description && name.endsWith(description)) {
+      name = name.slice(0, name.length - description.length).trim()
+    }
+    if (!name && description) name = description
+    const pluginFromClass = attrs.match(/task\.builder\.[\w.-]+/i)?.[0]
+      || body.match(/task\.builder\.[\w.-]+/i)?.[0]
+      || body.match(/pluginKey=([^&"']+)/i)?.[1]
+    const pluginKey = pluginFromClass
+      ? (pluginFromClass.includes('pluginKey=') || pluginFromClass.includes('%3A')
+        ? decodeURIComponent(pluginFromClass.replace(/^pluginKey=/i, ''))
+        : pluginFromClass.includes(':')
+          ? pluginFromClass
+          : `com.atlassian.bamboo.plugins.scripttask:${pluginFromClass}`)
+      : inferPluginKeyFromTaskName(name)
+    const disabled = /\bDISABLED\b/i.test(body)
+      || /\btask-disabled\b/i.test(attrs + body)
+      || /\bisDisabled\b/i.test(attrs)
+    const isFinalising = /\bfinal\b/i.test(attrs) || /finalTasks|final-tasks/i.test(html.slice(Math.max(0, itemMatch.index - 80), itemMatch.index))
+    pushTask({
+      id: Number(id),
+      name: name || undefined,
+      description: description || name || undefined,
+      pluginKey,
+      disabled,
+      isFinalising,
+    })
+  }
+
+  if (tasks.length === 0) {
+    const linkRe = /<a\b[^>]*href=["']([^"']*editTask\.action\?[^"']*taskId=(\d+)[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi
+    let linkMatch: RegExpExecArray | null
+    while ((linkMatch = linkRe.exec(html)) !== null) {
+      const id = linkMatch[2]
+      const name = decodeHtmlEntities(linkMatch[3].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+      if (!name || /delete\s*task/i.test(name)) continue
+      const after = html.slice(linkMatch.index, linkMatch.index + 600)
+      const summaryMatch = after.match(
+        /class=["'][^"']*(?:task-summary|task-description)[^"']*["'][^>]*>([\s\S]*?)<\//i,
+      )
+      const description = summaryMatch
+        ? decodeHtmlEntities(summaryMatch[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
+        : name
+      pushTask({
+        id: Number(id),
+        name,
+        description,
+        pluginKey: inferPluginKeyFromTaskName(name),
+        disabled: /\bDISABLED\b/i.test(after.slice(0, 400)),
+      })
+    }
+  }
+  return tasks
+}
+
+function inferPluginKeyFromTaskName(name: string): string | undefined {
+  const lower = (name || '').toLowerCase()
+  if (lower.includes('script')) return 'com.atlassian.bamboo.plugins.scripttask:task.builder.script'
+  if (lower.includes('command')) return 'com.atlassian.bamboo.plugins.scripttask:task.builder.command'
+  if (lower.includes('source code checkout') || lower.includes('checkout')) {
+    return 'com.atlassian.bamboo.plugins.vcs:task.vcs.checkout'
+  }
+  if (lower === 'npm' || lower.includes('npm')) {
+    return 'com.atlassian.bamboo.plugins.bamboo-npm-plugin:task.builder.npm'
+  }
+  return undefined
+}
+
+function parseBambooTaskEditForm(html: string): {
+  fields: Record<string, string>
+  checkboxes: Record<string, boolean>
+  form: Record<string, string>
+  fieldMeta: TaskFieldMeta[]
+} | null {
+  const formMatch = html.match(
+    /<form[^>]*action="[^"]*updateTask\.action[^"]*"[^>]*>([\s\S]*?)<\/form>/i,
+  ) || html.match(
+    /<form[^>]*name="updateTask"[^>]*>([\s\S]*?)<\/form>/i,
+  ) || html.match(
+    /<form[^>]*id="[^"]*task[^"]*"[^>]*>([\s\S]*?)<\/form>/i,
+  )
+  const formHtml = formMatch?.[1] ?? html
+  const form: Record<string, string> = {}
+  const checkboxes: Record<string, boolean> = {}
+  const fieldMetaMap = new Map<string, TaskFieldMeta>()
+
+  const inputRe = /<input\b([^>]*)>/gi
+  let inputMatch: RegExpExecArray | null
+  while ((inputMatch = inputRe.exec(formHtml)) !== null) {
+    const attrs = inputMatch[1]
+    const name = attrs.match(/\bname=["']([^"']+)["']/i)?.[1]
+    if (!name) continue
+    const type = (attrs.match(/\btype=["']([^"']+)["']/i)?.[1] || 'text').toLowerCase()
+    if (type === 'submit' || type === 'button' || type === 'image' || type === 'hidden') {
+      if (type === 'hidden') {
+        const value = attrs.match(/\bvalue=["']([^"']*)["']/i)?.[1] ?? ''
+        form[name] = decodeHtmlEntities(value)
+      }
+      continue
+    }
+    if (type === 'checkbox' || type === 'radio') {
+      const checked = /\bchecked\b/i.test(attrs)
+      const value = attrs.match(/\bvalue=["']([^"']*)["']/i)?.[1] ?? 'true'
+      checkboxes[name] = checked
+      if (checked) form[name] = decodeHtmlEntities(value)
+      if (type === 'checkbox' && !TASK_FORM_SYSTEM_KEYS.has(name)) {
+        fieldMetaMap.set(name, { key: name, type: 'checkbox' })
+      }
+      continue
+    }
+    const value = attrs.match(/\bvalue=["']([^"']*)["']/i)?.[1] ?? ''
+    form[name] = decodeHtmlEntities(value)
+    if (!TASK_FORM_SYSTEM_KEYS.has(name)) {
+      fieldMetaMap.set(name, { key: name, type: 'text' })
+    }
+  }
+
+  const textareaRe = /<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi
+  let textareaMatch: RegExpExecArray | null
+  while ((textareaMatch = textareaRe.exec(formHtml)) !== null) {
+    const name = textareaMatch[1].match(/\bname=["']([^"']+)["']/i)?.[1]
+    if (!name) continue
+    form[name] = decodeHtmlEntities(textareaMatch[2])
+    if (!TASK_FORM_SYSTEM_KEYS.has(name)) {
+      fieldMetaMap.set(name, { key: name, type: 'textarea' })
+    }
+  }
+
+  const selectRe = /<select\b([^>]*)>([\s\S]*?)<\/select>/gi
+  let selectMatch: RegExpExecArray | null
+  while ((selectMatch = selectRe.exec(formHtml)) !== null) {
+    const name = selectMatch[1].match(/\bname=["']([^"']+)["']/i)?.[1]
+    if (!name) continue
+    const options: { value: string; label: string }[] = []
+    const optionRe = /<option\b([^>]*)>([\s\S]*?)<\/option>/gi
+    let optionMatch: RegExpExecArray | null
+    let selectedValue = ''
+    while ((optionMatch = optionRe.exec(selectMatch[2])) !== null) {
+      const optionAttrs = optionMatch[1]
+      const value = optionAttrs.match(/\bvalue=["']([^"']*)["']/i)?.[1]
+        ?? stripHtmlText(optionMatch[2])
+      const label = stripHtmlText(optionMatch[2]) || value
+      options.push({ value: decodeHtmlEntities(value), label })
+      if (/\bselected\b/i.test(optionAttrs)) selectedValue = decodeHtmlEntities(value)
+    }
+    if (!selectedValue && options.length > 0) selectedValue = options[0].value
+    form[name] = selectedValue
+    if (!TASK_FORM_SYSTEM_KEYS.has(name)) {
+      fieldMetaMap.set(name, { key: name, type: 'select', options })
+    }
+  }
+
+  if (!form.atl_token) {
+    const tokenMatch = html.match(/name=["']atl_token["'][^>]*value=["']([^"']+)["']/i)
+      || html.match(/value=["']([^"']+)["'][^>]*name=["']atl_token["']/i)
+      || html.match(/atl_token["']\s*value=["']([^"']+)["']/i)
+    if (tokenMatch) form.atl_token = tokenMatch[1]
+  }
+
+  if (!form.atl_token && !form.taskId && !form.buildKey && !form.planKey) return null
+
+  const fields: Record<string, string> = {}
+  for (const [key, value] of Object.entries(form)) {
+    if (TASK_FORM_SYSTEM_KEYS.has(key)) continue
+    fields[key] = value
+    if (!fieldMetaMap.has(key)) {
+      fieldMetaMap.set(key, {
+        key,
+        type: MULTILINE_TASK_FIELDS.has(key) || value.includes('\n') ? 'textarea' : 'text',
+      })
+    }
+  }
+  if ('taskDisabled' in checkboxes) {
+    fields.taskDisabled = checkboxes.taskDisabled ? 'true' : 'false'
+    fieldMetaMap.set('taskDisabled', { key: 'taskDisabled', type: 'checkbox' })
+  }
+
+  const preferredOrder = [
+    'userDescription', 'selectedRepository', 'repositoryKey', 'checkoutDir',
+    'checkoutDirectory', 'cleanCheckout', 'scriptLocation', 'interpreter',
+    'scriptBody', 'script', 'command', 'commandLine', 'executable', 'argument',
+    'environmentVariables', 'workingSubDirectory', 'taskDisabled',
+  ]
+  const fieldMeta = [
+    ...preferredOrder.filter((key) => fieldMetaMap.has(key)).map((key) => fieldMetaMap.get(key)!),
+    ...[...fieldMetaMap.values()].filter((meta) => !preferredOrder.includes(meta.key)),
+  ]
+
+  return { fields, checkboxes, form, fieldMeta }
+}
+
 export class BambooClient {
   private baseUrl: string
   private username: string
@@ -722,9 +1009,55 @@ export class BambooClient {
   }
 
   async getPlanDetail(planKey: string): Promise<any> {
-    return this.request(
-      `/rest/api/latest/plan/${planKey}?expand=stages.stage.jobs.job.tasks,branches`
+    // Bamboo 6.x chain plans expose jobs under stages.stage.plans.plan (not jobs.job)
+    const data = await this.request<any>(
+      `/rest/api/latest/plan/${planKey}?expand=stages.stage.plans.plan,branches`
     )
+    const stageArr = data?.stages?.stage
+    const stages = Array.isArray(stageArr) ? stageArr : stageArr ? [stageArr] : []
+    for (const stage of stages) {
+      const plansRaw = stage?.plans?.plan
+      const plans = Array.isArray(plansRaw) ? plansRaw : plansRaw ? [plansRaw] : []
+      if (plans.length > 0 && !stage.jobs?.job) {
+        stage.jobs = {
+          size: plans.length,
+          'start-index': 0,
+          'max-result': plans.length,
+          job: plans,
+        }
+      }
+      const jobsRaw = stage?.jobs?.job
+      const jobs = Array.isArray(jobsRaw) ? jobsRaw : jobsRaw ? [jobsRaw] : []
+      await mapInBatches(jobs, 3, async (job: any) => {
+        const jobKey = job?.key || job?.planKey?.key
+        if (!jobKey || !isValidPlanKey(jobKey)) return job
+        if (job.tasks?.task) return job
+        try {
+          const jobDetail = await this.request<any>(
+            `/rest/api/latest/plan/${encodeURIComponent(jobKey)}?expand=stages.stage.plans.plan,stages.stage.jobs.job.tasks`
+          )
+          let tasksFromJob = extractTasksFromPlanDetail(jobDetail)
+          if (tasksFromJob.length === 0) {
+            tasksFromJob = await this.listJobTasksFromStruts(jobKey)
+          }
+          if (tasksFromJob.length > 0) {
+            job.tasks = { size: tasksFromJob.length, task: tasksFromJob }
+          }
+        } catch (err: any) {
+          logger.warn('API', `getPlanDetail: failed to load tasks for job ${jobKey}: ${err.message}`)
+          try {
+            const tasksFromStruts = await this.listJobTasksFromStruts(jobKey)
+            if (tasksFromStruts.length > 0) {
+              job.tasks = { size: tasksFromStruts.length, task: tasksFromStruts }
+            }
+          } catch (strutsErr: any) {
+            logger.warn('API', `listJobTasksFromStruts failed for ${jobKey}: ${strutsErr.message}`)
+          }
+        }
+        return job
+      })
+    }
+    return data
   }
 
   async getPlanResults(planKey: string): Promise<BambooBuildResult[]> {
@@ -1363,6 +1696,182 @@ export class BambooClient {
     return {
       success: false,
       errorMessage: 'Unable to stop build — it may have already finished or left the queue',
+    }
+  }
+
+  private strutsAuthHeaders(): Record<string, string> {
+    return this.authMethod === 'session'
+      ? { Cookie: this.getCookieHeader() }
+      : { Authorization: this.auth }
+  }
+
+  private async ensureSessionForStruts(): Promise<void> {
+    if (this.authMethod === 'session') return
+    const ok = await this.sessionLogin()
+    if (ok) this.authMethod = 'session'
+  }
+
+  async listJobTasksFromStruts(jobKey: string): Promise<any[]> {
+    if (!isValidPlanKey(jobKey)) return []
+    await this.ensureSessionForStruts()
+    const url = `${this.baseUrl}/build/admin/edit/editBuildTasks.action?buildKey=${encodeURIComponent(jobKey)}`
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { ...this.strutsAuthHeaders(), Accept: 'text/html' },
+      redirect: 'follow',
+    })
+    const setCookie = res.headers.getSetCookie?.() ?? []
+    this.parseCookies(setCookie)
+    if (!res.ok) return []
+    const html = await res.text()
+    return parseTasksFromEditBuildTasksHtml(html)
+  }
+
+  async getPlanTaskConfig(jobKey: string, taskId: string): Promise<{
+    ok: boolean
+    editable: boolean
+    pluginKey?: string
+    fields: Record<string, string>
+    checkboxes: Record<string, boolean>
+    form: Record<string, string>
+    fieldMeta: TaskFieldMeta[]
+    errorMessage?: string
+  }> {
+    if (!isValidPlanKey(jobKey) || !/^\d+$/.test(taskId)) {
+      return { ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [], errorMessage: 'Invalid jobKey or taskId' }
+    }
+    try {
+      await this.ensureSessionForStruts()
+      const url = `${this.baseUrl}/build/admin/edit/editTask.action?planKey=${encodeURIComponent(jobKey)}&taskId=${encodeURIComponent(taskId)}`
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          ...this.strutsAuthHeaders(),
+          Accept: 'text/html',
+        },
+        redirect: 'follow',
+      })
+      const setCookie = res.headers.getSetCookie?.() ?? []
+      this.parseCookies(setCookie)
+      const html = await res.text()
+      if (!res.ok) {
+        return {
+          ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [],
+          errorMessage: `Failed to load task editor (${res.status})`,
+        }
+      }
+      const parsed = parseBambooTaskEditForm(html)
+      if (!parsed) {
+        return {
+          ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [],
+          errorMessage: 'Could not parse task edit form',
+        }
+      }
+      const pluginKey = parsed.form.createTaskKey || parsed.form.pluginKey || ''
+      return {
+        ok: true,
+        editable: true,
+        pluginKey: pluginKey || undefined,
+        fields: parsed.fields,
+        checkboxes: parsed.checkboxes,
+        form: parsed.form,
+        fieldMeta: parsed.fieldMeta,
+      }
+    } catch (err: any) {
+      logger.error('API', `getPlanTaskConfig failed: ${err.message}`, { jobKey, taskId })
+      return {
+        ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [],
+        errorMessage: err.message || 'Failed to load task config',
+      }
+    }
+  }
+
+  async updatePlanTask(
+    jobKey: string,
+    taskId: string,
+    updates: Record<string, string | boolean>,
+  ): Promise<{ success: boolean; errorMessage?: string }> {
+    if (!isValidPlanKey(jobKey) || !/^\d+$/.test(taskId)) {
+      return { success: false, errorMessage: 'Invalid jobKey or taskId' }
+    }
+    try {
+      const current = await this.getPlanTaskConfig(jobKey, taskId)
+      if (!current.ok) {
+        return { success: false, errorMessage: current.errorMessage || 'Failed to load task' }
+      }
+      const body = new URLSearchParams()
+      const form = { ...current.form }
+      form.buildKey = jobKey
+      form.planKey = jobKey
+      form.taskId = taskId
+      for (const [key, value] of Object.entries(updates)) {
+        if (key === 'taskDisabled') continue
+        if (typeof value === 'boolean') {
+          if (value) form[key] = 'true'
+          else delete form[key]
+          continue
+        }
+        if (TASK_FORM_SYSTEM_KEYS.has(key)) continue
+        form[key] = value
+      }
+      const checkBoxFields = new Set(
+        (form.checkBoxFields || 'taskDisabled')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      checkBoxFields.add('taskDisabled')
+      for (const meta of current.fieldMeta || []) {
+        if (meta.type === 'checkbox' && meta.key !== 'taskDisabled') checkBoxFields.add(meta.key)
+      }
+      if (updates.taskDisabled === true) form.taskDisabled = 'true'
+      else delete form.taskDisabled
+      form.checkBoxFields = [...checkBoxFields].join(',')
+      for (const [key, value] of Object.entries(form)) {
+        if (value == null) continue
+        body.append(key, String(value))
+      }
+      if (!body.has('save')) body.append('save', 'Save')
+      const res = await fetch(`${this.baseUrl}/build/admin/edit/updateTask.action`, {
+        method: 'POST',
+        headers: {
+          ...this.strutsAuthHeaders(),
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'X-Atlassian-Token': 'no-check',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: body.toString(),
+        redirect: 'manual',
+      })
+      const setCookie = res.headers.getSetCookie?.() ?? []
+      this.parseCookies(setCookie)
+      const location = res.headers.get('location')
+      if (location && /login|userlogin/i.test(location)) {
+        return { success: false, errorMessage: 'Authentication required' }
+      }
+      if (res.status === 200) {
+        const text = await res.text().catch(() => '')
+        const errorMatch = text.match(/class="error"[^>]*>([^<]+)/i)
+          || text.match(/aui-message-error[^>]*>[\s\S]*?<p[^>]*>([^<]+)/i)
+        if (errorMatch?.[1]?.trim()) {
+          return { success: false, errorMessage: errorMatch[1].trim() }
+        }
+        if (/aui-message-error|errorBox/i.test(text) && /you have to specify|required/i.test(text)) {
+          return { success: false, errorMessage: 'Bamboo rejected the task update' }
+        }
+        logger.info('API', `updatePlanTask(${jobKey}, ${taskId}): success`, { status: res.status })
+        return { success: true }
+      }
+      if (isStrutsActionSuccess(res.status, location, this.baseUrl)) {
+        logger.info('API', `updatePlanTask(${jobKey}, ${taskId}): success via redirect`, {
+          status: res.status, location,
+        })
+        return { success: true }
+      }
+      return { success: false, errorMessage: `Save failed (${res.status})` }
+    } catch (err: any) {
+      logger.error('API', `updatePlanTask failed: ${err.message}`, { jobKey, taskId })
+      return { success: false, errorMessage: err.message || 'Failed to save task' }
     }
   }
 

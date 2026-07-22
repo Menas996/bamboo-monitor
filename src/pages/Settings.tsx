@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useI18n, Locale } from '../lib/i18n'
 import { useTheme } from '../lib/theme'
-import { Globe, Moon, Sun, Save, Check, Bell, GitBranch, Timer, Palette } from 'lucide-react'
+import { Globe, Moon, Sun, Save, Check, Bell, GitBranch, Timer, Palette, LogOut, User } from 'lucide-react'
 
-const SECTIONS = ['appearance', 'polling', 'deployment', 'notifications'] as const
+const SECTIONS = ['account', 'appearance', 'polling', 'deployment', 'notifications'] as const
 type Section = typeof SECTIONS[number]
 
 const styles = {
@@ -84,7 +84,7 @@ const styles = {
   }),
 }
 
-export default function Settings() {
+export default function Settings({ onLogout }: { onLogout: () => void }) {
   const { t, locale, setLocale } = useI18n()
   const { theme, setTheme } = useTheme()
   const [pollInterval, setPollInterval] = useState(30)
@@ -92,9 +92,13 @@ export default function Settings() {
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   const [gitRepoMappingsText, setGitRepoMappingsText] = useState('')
   const [saved, setSaved] = useState(false)
-  const [activeSection, setActiveSection] = useState<Section>('appearance')
+  const [activeSection, setActiveSection] = useState<Section>('account')
+  const [accountServer, setAccountServer] = useState('')
+  const [accountUsername, setAccountUsername] = useState('')
+  const [loggingOut, setLoggingOut] = useState(false)
 
   const sectionRefs = {
+    account: useRef<HTMLDivElement>(null),
     appearance: useRef<HTMLDivElement>(null),
     polling: useRef<HTMLDivElement>(null),
     deployment: useRef<HTMLDivElement>(null),
@@ -115,6 +119,12 @@ export default function Settings() {
           .map(([k, url]) => `${k}=${url}`)
         setGitRepoMappingsText(lines.join('\n'))
       }
+    })
+    window.config.get('server').then((value) => {
+      if (typeof value === 'string') setAccountServer(value)
+    })
+    window.config.get('username').then((value) => {
+      if (typeof value === 'string') setAccountUsername(value)
     })
   }, [])
 
@@ -174,7 +184,19 @@ export default function Settings() {
     setTimeout(() => setSaved(false), 2000)
   }
 
+  async function handleLogout() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      await window.bamboo.logout()
+      onLogout()
+    } finally {
+      setLoggingOut(false)
+    }
+  }
+
   const sectionMeta: Record<Section, { icon: React.ReactNode; label: string }> = {
+    account: { icon: <User size={14} />, label: t('settings.section.account') },
     appearance: { icon: <Palette size={14} />, label: t('settings.section.appearance') },
     polling: { icon: <Timer size={14} />, label: t('settings.section.polling') },
     deployment: { icon: <GitBranch size={14} />, label: t('settings.section.deployment') },
@@ -214,6 +236,37 @@ export default function Settings() {
         </div>
 
         <div style={styles.contentInner}>
+          <div ref={sectionRefs.account} style={styles.sectionWrap}>
+            <div style={styles.sectionTitle}><User size={16} />{t('settings.section.account')}</div>
+            <div style={styles.card}>
+              <div style={{ marginBottom: 16 }}>
+                <div style={styles.labelRow}>{t('login.server')}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                  {accountServer || '—'}
+                </div>
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <div style={styles.labelRow}>{t('login.username')}</div>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+                  {accountUsername || '—'}
+                </div>
+              </div>
+              <div style={styles.hint}>{t('settings.logout.hint')}</div>
+              <button
+                className="btn-ghost"
+                onClick={() => void handleLogout()}
+                disabled={loggingOut}
+                style={{
+                  marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 6,
+                  color: 'var(--error, #ef4444)',
+                }}
+              >
+                <LogOut size={14} />
+                {loggingOut ? t('settings.logging_out') : t('settings.logout')}
+              </button>
+            </div>
+          </div>
+
           {/* Appearance */}
           <div ref={sectionRefs.appearance} style={styles.sectionWrap}>
             <div style={styles.sectionTitle}><Palette size={16} />{t('settings.section.appearance')}</div>

@@ -11,6 +11,7 @@ import {
 import StatusBadge from '../components/StatusBadge'
 import BuildHistoryStrip from '../components/BuildHistoryStrip'
 import BuildLogViewer from '../components/BuildLogViewer'
+import PlanTaskConfig from '../components/PlanTaskConfig'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
   ArrowLeft, GitCommit, Clock, User, Layers,
@@ -91,7 +92,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const goBack = useGoBack()
   const [detail, setDetail] = useState<BuildDetailData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'logs' | 'changes' | 'variables' | 'tests' | 'history' | 'jira' | 'deployments'>('summary')
+  const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'logs' | 'changes' | 'variables' | 'tests' | 'history' | 'jira' | 'deployments' | 'planConfig'>('summary')
   const [planResults, setPlanResults] = useState<any[]>([])
   const [planResultsLoading, setPlanResultsLoading] = useState(false)
   const [planHistoryHasMore, setPlanHistoryHasMore] = useState(false)
@@ -573,6 +574,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const tabs = [
     { key: 'summary', label: t('build.tab_summary') },
     { key: 'stages', label: t('build.tab_stages').replace('{count}', String(stages.length)) },
+    { key: 'planConfig', label: t('build.tab_plan_config') },
     { key: 'logs', label: t('build.tab_logs') },
     { key: 'jira', label: t('build.tab_jira').replace('{count}', String(jiraCount)) },
     { key: 'changes', label: t('build.tab_changes').replace('{count}', String(normalizedChanges.length)) },
@@ -735,6 +737,9 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         {activeTab === 'summary' && <SummaryTab detail={detail} />}
         {activeTab === 'stages' && (
           <StagesTab stages={stages} />
+        )}
+        {activeTab === 'planConfig' && (
+          <PlanTaskConfig planKey={detail.plan?.key ?? routePlanKey} />
         )}
         {activeTab === 'logs' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

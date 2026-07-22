@@ -24,6 +24,9 @@ export default function Login({ onLogin }: Props) {
     window.config.get('server').then((value) => {
       if (typeof value === 'string' && value) setServer(value)
     })
+    window.config.get('username').then((value) => {
+      if (typeof value === 'string' && value) setUsername(value)
+    })
   }, [])
 
   useEffect(() => {

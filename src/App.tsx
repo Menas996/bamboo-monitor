@@ -18,6 +18,7 @@ declare global {
   interface Window {
     bamboo: {
       login: (server: string, username: string, password: string) => Promise<boolean>
+      logout: () => Promise<boolean>
       getProjects: () => Promise<any[]>
       getDeployments: (projectKey: string) => Promise<{ ok: boolean; deploys: any[]; error?: string }>
       getDeploymentsPage: (projectKey: string, startIndex: number, pageSize: number) => Promise<
@@ -28,6 +29,20 @@ declare global {
       getFullBuildLog: (buildResultKey: string) => Promise<string | null>
       getBuildDetail: (buildResultKey: string) => Promise<any>
       getPlanDetail: (planKey: string) => Promise<any>
+      getPlanTaskConfig: (jobKey: string, taskId: string) => Promise<{
+        ok: boolean
+        editable: boolean
+        pluginKey?: string
+        fields: Record<string, string>
+        checkboxes: Record<string, boolean>
+        form: Record<string, string>
+        fieldMeta?: { key: string; type: 'text' | 'textarea' | 'select' | 'checkbox'; options?: { value: string; label: string }[] }[]
+        errorMessage?: string
+      }>
+      updatePlanTask: (jobKey: string, taskId: string, updates: Record<string, string | boolean>) => Promise<{
+        success: boolean
+        errorMessage?: string
+      }>
       getPlanResults: (planKey: string) => Promise<any>
       getPlanResultsEnriched: (planKey: string) => Promise<any>
       getPlanResultsHistoryPage: (planKey: string, startIndex: number, pageSize: number) => Promise<{ rows: any[]; hasMore: boolean }>
@@ -115,7 +130,10 @@ export default function App() {
             ) : !loggedIn ? (
               <Login onLogin={() => { setLoggedIn(true); rendererLog.info('AUTH', 'Login successful') }} />
             ) : (
-              <AppShell />
+              <AppShell onLogout={() => {
+                setLoggedIn(false)
+                rendererLog.info('AUTH', 'Logged out')
+              }} />
             )}
           </NavigationProvider>
         </ErrorBoundary>
@@ -125,7 +143,7 @@ export default function App() {
 }
 
 /** Inner component that reads the current route and renders the appropriate page. */
-function AppShell() {
+function AppShell({ onLogout }: { onLogout: () => void }) {
   const route = useRoute()
   const navigate = useNavigate()
 
@@ -154,7 +172,7 @@ function AppShell() {
             </div>
           )}
           {route.page === 'build' && <BuildDetail buildResultKey={route.buildResultKey} />}
-          {route.page === 'settings' && <Settings />}
+          {route.page === 'settings' && <Settings onLogout={onLogout} />}
           {route.page === 'logs' && <Logs />}
           {route.page === 'health' && <Health />}
           {route.page === 'overview' && <Overview />}

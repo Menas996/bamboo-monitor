@@ -6,7 +6,7 @@ import { startPolling, stopPolling, type FavoritePlan, type PollingOptions } fro
 import { setupTray } from './tray'
 import { getAppIcon, setDockIcon } from './app-icon'
 import { logger } from './lib/logger'
-import { readStoredPassword, writeStoredPassword } from './lib/credentials'
+import { clearStoredPassword, readStoredPassword, writeStoredPassword } from './lib/credentials'
 import {
   isConfigKeyAllowed, isValidBuildResultKey, isValidPlanKey, isValidProjectKey,
   isHttpServerUrl, resolveBambooUrl, validateServerUrl,
@@ -301,6 +301,7 @@ if (!gotTheLock) {
           store.set('username', username)
           writeStoredPassword(store, password)
           logger.info('AUTH', 'Login successful')
+          startMonitoring()
         } else {
           bamboo = null
           logger.warn('AUTH', 'Login failed — invalid credentials')
@@ -311,6 +312,15 @@ if (!gotTheLock) {
         logger.error('AUTH', `Login error: ${err.message}`, { stack: err.stack })
         return false
       }
+    })
+
+    ipcMain.handle('bamboo:logout', async (event) => {
+      if (!assertMainSender(event)) return false
+      stopPolling()
+      bamboo = null
+      clearStoredPassword(store)
+      logger.info('AUTH', 'Logged out — password cleared, server/username retained')
+      return true
     })
 
     ipcMain.handle('bamboo:getProjects', async () => {
@@ -415,6 +425,37 @@ if (!gotTheLock) {
       } catch (err: any) {
         logger.error('API', `getPlanDetail failed for ${planKey}: ${err.message}`)
         return null
+      }
+    })
+
+    ipcMain.handle('bamboo:getPlanTaskConfig', async (event, jobKey: string, taskId: string) => {
+      if (!assertMainSender(event) || !isValidPlanKey(jobKey) || typeof taskId !== 'string' || !/^\d+$/.test(taskId)) {
+        return { ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [], errorMessage: 'Invalid request' }
+      }
+      if (!bamboo) {
+        return { ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [], errorMessage: 'Not connected' }
+      }
+      try {
+        return await bamboo.getPlanTaskConfig(jobKey, taskId)
+      } catch (err: any) {
+        logger.error('API', `getPlanTaskConfig failed: ${err.message}`)
+        return { ok: false, editable: false, fields: {}, checkboxes: {}, form: {}, fieldMeta: [], errorMessage: err.message }
+      }
+    })
+
+    ipcMain.handle('bamboo:updatePlanTask', async (event, jobKey: string, taskId: string, updates: Record<string, string | boolean>) => {
+      if (!assertMainSender(event) || !isValidPlanKey(jobKey) || typeof taskId !== 'string' || !/^\d+$/.test(taskId)) {
+        return { success: false, errorMessage: 'Invalid request' }
+      }
+      if (!bamboo) return { success: false, errorMessage: 'Not connected' }
+      if (!updates || typeof updates !== 'object') {
+        return { success: false, errorMessage: 'Invalid updates' }
+      }
+      try {
+        return await bamboo.updatePlanTask(jobKey, taskId, updates)
+      } catch (err: any) {
+        logger.error('API', `updatePlanTask failed: ${err.message}`)
+        return { success: false, errorMessage: err.message }
       }
     })
 

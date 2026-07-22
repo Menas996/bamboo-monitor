@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('bamboo', {
   login: (server: string, username: string, password: string) =>
     ipcRenderer.invoke('bamboo:login', server, username, password),
 
+  logout: () => ipcRenderer.invoke('bamboo:logout'),
+
   getProjects: () => ipcRenderer.invoke('bamboo:getProjects'),
 
   getDeployments: (projectKey: string) =>
@@ -26,6 +28,12 @@ contextBridge.exposeInMainWorld('bamboo', {
 
   getPlanDetail: (planKey: string) =>
     ipcRenderer.invoke('bamboo:getPlanDetail', planKey),
+
+  getPlanTaskConfig: (jobKey: string, taskId: string) =>
+    ipcRenderer.invoke('bamboo:getPlanTaskConfig', jobKey, taskId),
+
+  updatePlanTask: (jobKey: string, taskId: string, updates: Record<string, string | boolean>) =>
+    ipcRenderer.invoke('bamboo:updatePlanTask', jobKey, taskId, updates),
 
   getPlanResults: (planKey: string) =>
     ipcRenderer.invoke('bamboo:getPlanResults', planKey),
