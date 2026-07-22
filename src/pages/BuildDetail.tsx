@@ -10,9 +10,10 @@ import {
 } from '../lib/bamboo-build'
 import StatusBadge from '../components/StatusBadge'
 import BuildHistoryStrip from '../components/BuildHistoryStrip'
+import BuildLogViewer from '../components/BuildLogViewer'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
-  ArrowLeft, GitCommit, Clock, User, Layers, AlertTriangle,
+  ArrowLeft, GitCommit, Clock, User, Layers,
   FileText, Box, List, MoreVertical, RefreshCw, Play, Trash2,
   Bug, ToggleLeft, Star, Settings, Tag, Check, X, ExternalLink, GitBranch,
   Ban, RotateCw, Activity,
@@ -31,7 +32,7 @@ function openValidatedLink(href: string) {
 }
 
 const DETAIL_POLL_MS_RUNNING = 5000
-const LIVE_DETAIL_TABS = new Set(['summary', 'stages', 'tests'])
+const LIVE_DETAIL_TABS = new Set(['summary', 'stages', 'tests', 'logs'])
 
 function formatDuration(ms?: number): string {
   if (!ms) return '-'
@@ -90,7 +91,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
   const goBack = useGoBack()
   const [detail, setDetail] = useState<BuildDetailData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'changes' | 'variables' | 'tests' | 'history' | 'jira' | 'deployments'>('summary')
+  const [activeTab, setActiveTab] = useState<'summary' | 'stages' | 'logs' | 'changes' | 'variables' | 'tests' | 'history' | 'jira' | 'deployments'>('summary')
   const [planResults, setPlanResults] = useState<any[]>([])
   const [planResultsLoading, setPlanResultsLoading] = useState(false)
   const [planHistoryHasMore, setPlanHistoryHasMore] = useState(false)
@@ -168,7 +169,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     if (!planKey) return
     const result = await window.actions.queueBuild(planKey, variables)
     if (result.success) {
-      showMsg('success', `Build queued for ${planKey}`)
+      showMsg('success', t('build.queue_success').replace('{planKey}', planKey))
       let targetKey = result.buildResultKey ?? null
       if (!targetKey) {
         try {
@@ -190,7 +191,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         navigate({ page: 'build', buildResultKey: targetKey })
       }
     } else {
-      showMsg('error', `Failed to queue build for ${planKey}`)
+      showMsg('error', t('build.queue_failed').replace('{planKey}', planKey))
     }
     setActionsOpen(false)
     setCustomizeOpen(false)
@@ -524,9 +525,9 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     return (
       <div style={{ padding: 32 }}>
         <button className="btn-ghost" onClick={goBack} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16 }}>
-          <ArrowLeft size={14} /> Back
+          <ArrowLeft size={14} /> {t('common.back')}
         </button>
-        <div style={{ color: 'var(--text-tertiary)' }}>Build not found</div>
+        <div style={{ color: 'var(--text-tertiary)' }}>{t('build.not_found')}</div>
       </div>
     )
   }
@@ -570,14 +571,15 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
     || (detail.buildResultKey === buildResultKey ? detail.buildNumber : 0)
   const jiraCount = detail.jiraIssues?.jiraIssue?.length ?? 0
   const tabs = [
-    { key: 'summary', label: 'Summary' },
-    { key: 'stages', label: `Stages (${stages.length})` },
-    { key: 'jira', label: `Jira (${jiraCount})` },
-    { key: 'changes', label: `Changes (${normalizedChanges.length})` },
-    { key: 'variables', label: `Config (${detail.variables?.variable?.length ?? 0})` },
-    { key: 'tests', label: 'Tests' },
-    { key: 'deployments', label: `Deployments` },
-    { key: 'history', label: `History` },
+    { key: 'summary', label: t('build.tab_summary') },
+    { key: 'stages', label: t('build.tab_stages').replace('{count}', String(stages.length)) },
+    { key: 'logs', label: t('build.tab_logs') },
+    { key: 'jira', label: t('build.tab_jira').replace('{count}', String(jiraCount)) },
+    { key: 'changes', label: t('build.tab_changes').replace('{count}', String(normalizedChanges.length)) },
+    { key: 'variables', label: t('build.tab_config').replace('{count}', String(detail.variables?.variable?.length ?? 0)) },
+    { key: 'tests', label: t('build.tab_tests') },
+    { key: 'deployments', label: t('build.tab_deployments') },
+    { key: 'history', label: t('build.tab_history') },
   ] as const
 
   return (
@@ -652,7 +654,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                 className="btn-ghost"
                 style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}
               >
-                <MoreVertical size={14} /> Actions
+                <MoreVertical size={14} /> {t('build.actions')}
               </button>
               {actionsOpen && (
                 <div style={{
@@ -660,7 +662,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                   minWidth: 220, background: 'var(--bg-elevated)', border: '1px solid var(--border-default)',
                   borderRadius: 'var(--radius-lg)', padding: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                 }}>
-                  <DropdownLabel>Build</DropdownLabel>
+                  <DropdownLabel>{t('build.actions_build')}</DropdownLabel>
                   {deploying && (
                     <DropdownItem
                       icon={Ban}
@@ -669,20 +671,20 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                       danger
                     />
                   )}
-                  <DropdownItem icon={RefreshCw} label="Rerun this build" onClick={() => handleQueueBuild()} />
-                  <DropdownItem icon={Play} label="Run plan" onClick={() => handleQueueBuild()} />
-                  <DropdownItem icon={Settings} label="Run customized..." onClick={openCustomize} />
+                  <DropdownItem icon={RefreshCw} label={t('build.rerun')} onClick={() => handleQueueBuild()} />
+                  <DropdownItem icon={Play} label={t('build.run_plan')} onClick={() => handleQueueBuild()} />
+                  <DropdownItem icon={Settings} label={t('build.run_customized')} onClick={openCustomize} />
                   <DropdownDivider />
-                  <DropdownItem icon={Trash2} label="Remove this result" onClick={() => setConfirmRemove(true)} danger />
-                  <DropdownItem icon={Bug} label="Create issue" onClick={() => handleOpenBamboo(`/browse/${buildResultKey}`)} />
+                  <DropdownItem icon={Trash2} label={t('build.remove_result')} onClick={() => setConfirmRemove(true)} danger />
+                  <DropdownItem icon={Bug} label={t('build.create_issue')} onClick={() => handleOpenBamboo(`/browse/${buildResultKey}`)} />
                   <DropdownDivider />
-                  <DropdownLabel>Plan</DropdownLabel>
-                  <DropdownItem icon={ToggleLeft} label="Disable plan" onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
-                  <DropdownItem icon={Star} label="Favourite plan" onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
-                  <DropdownItem icon={Settings} label="Configure plan" onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
-                  <DropdownItem icon={Tag} label="Modify plan label" onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
+                  <DropdownLabel>{t('build.actions_plan')}</DropdownLabel>
+                  <DropdownItem icon={ToggleLeft} label={t('build.disable_plan')} onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
+                  <DropdownItem icon={Star} label={t('build.favourite_plan')} onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
+                  <DropdownItem icon={Settings} label={t('build.configure_plan')} onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
+                  <DropdownItem icon={Tag} label={t('build.modify_label')} onClick={() => handleOpenBamboo(`/browse/${detail.plan?.key ?? ''}`)} />
                   <DropdownDivider />
-                  <DropdownItem icon={ExternalLink} label="Open in Bamboo" onClick={() => handleOpenBamboo(`/browse/${buildResultKey}`)} />
+                  <DropdownItem icon={ExternalLink} label={t('build.open_in_bamboo')} onClick={() => handleOpenBamboo(`/browse/${buildResultKey}`)} />
                 </div>
               )}
             </div>
@@ -723,9 +725,27 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 24, minWidth: 0, minHeight: 0 }}>
+      <div style={{
+        flex: 1, minWidth: 0, minHeight: 0,
+        overflow: activeTab === 'logs' ? 'hidden' : 'auto',
+        padding: 24,
+        display: activeTab === 'logs' ? 'flex' : 'block',
+        flexDirection: 'column',
+      }}>
         {activeTab === 'summary' && <SummaryTab detail={detail} />}
-        {activeTab === 'stages' && <StagesTab stages={stages} buildResultKey={detail.buildResultKey} isFailed={detail.buildState === 'Failed'} />}
+        {activeTab === 'stages' && (
+          <StagesTab stages={stages} />
+        )}
+        {activeTab === 'logs' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <BuildLogViewer
+              buildResultKey={buildResultKey}
+              live={deploying}
+              defaultExpanded
+              fill
+            />
+          </div>
+        )}
         {activeTab === 'jira' && <JiraTab jiraIssues={detail.jiraIssues?.jiraIssue ?? []} />}
         {activeTab === 'changes' && (
           <ChangesTab changes={normalizedChanges} vcs={detail.vcsRevisions?.vcsRevision ?? []} />
@@ -763,23 +783,23 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
             width: 480, maxHeight: '80vh', overflow: 'auto', padding: 24,
           }} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 16, fontWeight: 510, color: 'var(--text-primary)', marginBottom: 16 }}>
-              Run Customized — {detail.plan?.key}
+              {t('build.run_customized_title').replace('{planKey}', detail.plan?.key ?? '')}
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginBottom: 16 }}>
-              Set custom build variables for this run.
+              {t('build.run_customized_hint')}
             </p>
             {customVars.map((v, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                 <input
                   className="input-linear"
-                  placeholder="Variable name"
+                  placeholder={t('build.variable_name')}
                   value={v.key}
                   onChange={(e) => updateCustomVar(i, 'key', e.target.value)}
                   style={{ flex: 1, fontSize: 13, padding: '6px 10px' }}
                 />
                 <input
                   className="input-linear"
-                  placeholder="Value"
+                  placeholder={t('build.variable_value')}
                   value={v.value}
                   onChange={(e) => updateCustomVar(i, 'value', e.target.value)}
                   style={{ flex: 1, fontSize: 13, padding: '6px 10px' }}
@@ -792,12 +812,12 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
               </div>
             ))}
             <button onClick={addCustomVar} className="btn-ghost" style={{ fontSize: 12, padding: '4px 12px', marginBottom: 16 }}>
-              + Add variable
+              {t('build.add_variable')}
             </button>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn-ghost" onClick={() => setCustomizeOpen(false)} style={{ fontSize: 13 }}>Cancel</button>
+              <button className="btn-ghost" onClick={() => setCustomizeOpen(false)} style={{ fontSize: 13 }}>{t('common.cancel')}</button>
               <button className="btn-primary" onClick={submitCustomized} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-                <Play size={12} /> Run Build
+                <Play size={12} /> {t('build.run_build')}
               </button>
             </div>
           </div>
@@ -812,13 +832,13 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         }} onClick={() => setConfirmRemove(false)}>
           <div className="card-surface" style={{ width: 380, padding: 24 }} onClick={(e) => e.stopPropagation()}>
             <h2 style={{ fontSize: 16, fontWeight: 510, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Remove build result?
+              {t('build.remove_confirm_title')}
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-tertiary)', marginBottom: 20 }}>
-              This will permanently delete build result <strong>{buildResultKey}</strong>. This action cannot be undone.
+              {t('build.remove_confirm_body').replace('{key}', buildResultKey)}
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button className="btn-ghost" onClick={() => setConfirmRemove(false)} style={{ fontSize: 13 }}>Cancel</button>
+              <button className="btn-ghost" onClick={() => setConfirmRemove(false)} style={{ fontSize: 13 }}>{t('common.cancel')}</button>
               <button
                 onClick={handleRemoveResult}
                 disabled={deleting}
@@ -829,7 +849,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
                   display: 'flex', alignItems: 'center', gap: 6,
                 }}
               >
-                <Trash2 size={12} /> {deleting ? '…' : 'Remove'}
+                <Trash2 size={12} /> {deleting ? '…' : t('common.remove')}
               </button>
             </div>
           </div>
@@ -899,26 +919,31 @@ function SummaryTab({ detail }: { detail: BuildDetailData }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
-      <InfoCard icon={User} label="Triggered By" value={extractText(detail.buildReason)} />
-      <InfoCard icon={Clock} label="Started" value={detail.startTime ? new Date(detail.startTime).toLocaleString() : '-'} />
-      <InfoCard icon={Clock} label="Completed" value={detail.buildCompletedDate ? new Date(detail.buildCompletedDate).toLocaleString() : '-'} />
-      <InfoCard icon={Clock} label="Duration" value={formatDuration(detail.buildDuration)} />
-      <InfoCard icon={Layers} label="Lifecycle" value={detail.lifeCycleState} />
-      <InfoCard icon={Box} label="Build" value={`#${detail.buildNumber}`} />
+      <InfoCard icon={User} label={t('deploy.triggeredBy')} value={extractText(detail.buildReason)} />
+      <InfoCard icon={Clock} label={t('deploy.started')} value={detail.startTime ? new Date(detail.startTime).toLocaleString() : '-'} />
+      <InfoCard icon={Clock} label={t('build.completed')} value={detail.buildCompletedDate ? new Date(detail.buildCompletedDate).toLocaleString() : '-'} />
+      <InfoCard icon={Clock} label={t('build.duration')} value={formatDuration(detail.buildDuration)} />
+      <InfoCard icon={Layers} label={t('build.lifecycle')} value={detail.lifeCycleState} />
+      <InfoCard icon={Box} label={t('build.build_label')} value={`#${detail.buildNumber}`} />
       <InfoCard icon={Tag} label={t('build.plan_key')} value={detail.plan?.key ?? '-'} />
       <InfoCard icon={GitCommit} label={t('build.revision')} value={revision} />
       {branch && <InfoCard icon={GitCommit} label={t('build.branch')} value={branch} />}
       {totalTests > 0 && <InfoCard icon={Bug} label={t('build.test_pass_rate')} value={testSummary} />}
       {detail.plan?.description && (
         <div style={{ gridColumn: '1 / -1' }}>
-          <InfoCard icon={FileText} label="Description" value={detail.plan.description} />
+          <InfoCard icon={FileText} label={t('build.description')} value={detail.plan.description} />
         </div>
       )}
     </div>
   )
 }
 
-function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildResultKey: string; isFailed: boolean }) {
+function StagesTab({
+  stages,
+}: {
+  stages: any[]
+  buildResultKey?: string
+}) {
   const { t } = useI18n()
   const [expandedStage, setExpandedStage] = useState<number | null>(null)
 
@@ -949,7 +974,7 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
                 <div className="truncate" style={{ fontSize: 14, fontWeight: 510, color: 'var(--text-primary)' }} title={s.name}>{s.name}</div>
                 {jobs.length > 0 && (
                   <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 2 }}>
-                    {jobs.length} job{jobs.length !== 1 ? 's' : ''}
+                    {t('build.job_count').replace('{count}', String(jobs.length))}
                   </div>
                 )}
               </div>
@@ -962,7 +987,7 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
               <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 8, fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', padding: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
                   <span>{t('build.job_name')}</span>
-                  <span>Status</span>
+                  <span>{t('deploy.state')}</span>
                   <span style={{ textAlign: 'right' }}>{t('build.job_duration')}</span>
                 </div>
                 {jobs.map((job: any, j: number) => {
@@ -970,7 +995,7 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
                   return (
                     <div key={j} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto', gap: 8, padding: '5px 0', borderTop: j > 0 ? '1px solid var(--border-subtle)' : 'none', alignItems: 'center' }}>
                       <span className="truncate" style={{ fontSize: 12, color: 'var(--text-secondary)' }} title={job.name}>
-                        {job.name ?? `Job ${j + 1}`}
+                        {job.name ?? t('build.job_fallback').replace('{index}', String(j + 1))}
                       </span>
                       <span style={{ flexShrink: 0 }}><StatusBadge status={job.state ?? job.lifeCycleState ?? 'Unknown'} /></span>
                       <span style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
@@ -984,14 +1009,6 @@ function StagesTab({ stages, buildResultKey, isFailed }: { stages: any[]; buildR
           </div>
         )
       })}
-      {isFailed && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 510, color: 'var(--error)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <AlertTriangle size={12} /> Error Details
-          </div>
-          <ErrorLogViewer buildResultKey={buildResultKey} />
-        </div>
-      )}
     </div>
   )
 }
@@ -1004,11 +1021,11 @@ function ChangesTab({ changes, vcs }: { changes: NormalizedChange[]; vcs: any[] 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {vcsList.length > 0 && (
         <div>
-          <SectionTitle><GitCommit size={12} /> Git Repositories ({vcsList.length})</SectionTitle>
+          <SectionTitle><GitCommit size={12} /> {t('build.git_repos').replace('{count}', String(vcsList.length))}</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {vcsList.map((v, i) => (
               <div key={i} className="card-surface" style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13, fontWeight: 510, color: 'var(--accent)' }}>{v.repositoryName ?? 'Repository'}</span>
+                <span style={{ fontSize: 13, fontWeight: 510, color: 'var(--accent)' }}>{v.repositoryName ?? t('build.repository')}</span>
                 <code style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace', background: 'var(--bg-page)', padding: '2px 8px', borderRadius: 3 }}>
                   {v.vcsRevisionKey?.slice(0, 12) ?? '-'}
                 </code>
@@ -1024,15 +1041,15 @@ function ChangesTab({ changes, vcs }: { changes: NormalizedChange[]; vcs: any[] 
       )}
       {changes.length > 0 && (
         <div>
-          <SectionTitle><GitCommit size={12} /> Commits ({changes.length})</SectionTitle>
+          <SectionTitle><GitCommit size={12} /> {t('build.commits').replace('{count}', String(changes.length))}</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {changes.map((c, i) => (
               <div key={i} className="card-surface" style={{ padding: '10px 14px' }}>
                 <div className="scroll-row" style={{ gap: 12 }}>
                   <span className="scroll-row__meta" style={{
                     fontSize: 12, fontWeight: 510, color: 'var(--accent)', flex: '0 1 120px', maxWidth: 160,
-                  }} title={c.author ?? 'unknown'}>
-                    {c.author ?? 'unknown'}
+                  }} title={c.author ?? t('build.unknown_author')}>
+                    {c.author ?? t('build.unknown_author')}
                   </span>
                   <span className="scroll-row__grow" style={{ fontSize: 13, color: 'var(--text-secondary)' }} title={c.message}>
                     {c.message || t('build.no_commit_message')}
@@ -1054,18 +1071,19 @@ function ChangesTab({ changes, vcs }: { changes: NormalizedChange[]; vcs: any[] 
         </div>
       )}
       {changes.length === 0 && vcsList.length === 0 && (
-        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No changes recorded</div>
+        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>{t('build.no_changes')}</div>
       )}
     </div>
   )
 }
 
 function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
+  const { t } = useI18n()
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {jiraIssues.length > 0 && (
         <div>
-          <SectionTitle><ExternalLink size={12} /> Jira Issues ({jiraIssues.length})</SectionTitle>
+          <SectionTitle><ExternalLink size={12} /> {t('build.jira_issues').replace('{count}', String(jiraIssues.length))}</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {jiraIssues.map((issue: any, i: number) => (
               <div key={i} className="card-surface scroll-row" style={{ padding: '10px 14px', gap: 12 }}>
@@ -1094,7 +1112,7 @@ function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
                     }}
                     title={issue.url}
                   >
-                    <ExternalLink size={11} /> Open
+                    <ExternalLink size={11} /> {t('common.open')}
                   </button>
                 )}
               </div>
@@ -1103,7 +1121,7 @@ function JiraTab({ jiraIssues }: { jiraIssues: any[] }) {
         </div>
       )}
       {jiraIssues.length === 0 && (
-        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No Jira issues linked</div>
+        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>{t('build.no_jira')}</div>
       )}
     </div>
   )
@@ -1115,10 +1133,10 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {variables.length > 0 && (
         <div>
-          <SectionTitle><FileText size={12} /> Deployment Configuration ({variables.length})</SectionTitle>
+          <SectionTitle><FileText size={12} /> {t('build.deployment_config').replace('{count}', String(variables.length))}</SectionTitle>
           <div className="card-surface" style={{ padding: 0 }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 180px) minmax(0, 1fr)', fontSize: 11, fontWeight: 500, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.03em', padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
-              <span>Name</span><span>Value</span>
+              <span>{t('common.name')}</span><span>{t('common.value')}</span>
             </div>
             {variables.map((v, i) => (
               <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 180px) minmax(0, 1fr)', padding: '7px 16px', borderTop: i > 0 ? '1px solid var(--border-subtle)' : 'none', fontSize: 13 }}>
@@ -1131,14 +1149,14 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
       )}
       {artifacts.length > 0 && (
         <div>
-          <SectionTitle><Box size={12} /> Artifacts ({artifacts.length})</SectionTitle>
+          <SectionTitle><Box size={12} /> {t('build.artifacts').replace('{count}', String(artifacts.length))}</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {artifacts.map((a, i) => (
               <div key={i} className="card-surface scroll-row" style={{ padding: '10px 14px', gap: 12 }}>
                 <Box size={14} style={{ color: 'var(--text-quaternary)', flexShrink: 0 }} />
                 <span className="scroll-row__grow" style={{ fontSize: 13, color: 'var(--text-secondary)' }} title={a.name}>{a.name}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-quaternary)', flexShrink: 0, fontFamily: 'monospace' }}>
-                  {a.size != null ? `${(a.size / 1024).toFixed(1)} KB` : ''}
+                  {a.size != null ? t('build.size_kb').replace('{size}', (a.size / 1024).toFixed(1)) : ''}
                 </span>
                 {a.link?.href && (isSafeHttpUrl(a.link.href) || a.link.href.startsWith('/')) && (
                   <button
@@ -1160,7 +1178,7 @@ function VariablesTab({ variables, artifacts }: { variables: any[]; artifacts: a
         </div>
       )}
       {variables.length === 0 && artifacts.length === 0 && (
-        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No configuration data</div>
+        <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>{t('build.no_config')}</div>
       )}
     </div>
   )
@@ -1174,23 +1192,23 @@ function TestsTab({ detail }: { detail: BuildDetailData }) {
   const total = passed + failed + skipped
 
   if (total === 0) {
-    return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No test data</div>
+    return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>{t('build.no_tests')}</div>
   }
 
   const passRate = Math.round((passed / total) * 100)
   const pieData = [
-    ...(passed > 0 ? [{ name: 'Passed', value: passed, color: '#22c55e' }] : []),
-    ...(failed > 0 ? [{ name: 'Failed', value: failed, color: '#ef4444' }] : []),
-    ...(skipped > 0 ? [{ name: 'Skipped', value: skipped, color: '#737373' }] : []),
+    ...(passed > 0 ? [{ name: t('build.test_passed'), value: passed, color: '#22c55e' }] : []),
+    ...(failed > 0 ? [{ name: t('build.test_failed'), value: failed, color: '#ef4444' }] : []),
+    ...(skipped > 0 ? [{ name: t('build.test_skipped'), value: skipped, color: '#737373' }] : []),
   ]
 
   return (
     <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <TestStat label="Passed" count={passed} color="var(--success)" />
-        <TestStat label="Failed" count={failed} color="var(--error)" />
-        <TestStat label="Skipped" count={skipped} color="var(--text-quaternary)" />
-        <TestStat label="Total" count={total} color="var(--accent)" />
+        <TestStat label={t('build.test_passed')} count={passed} color="var(--success)" />
+        <TestStat label={t('build.test_failed')} count={failed} color="var(--error)" />
+        <TestStat label={t('build.test_skipped')} count={skipped} color="var(--text-quaternary)" />
+        <TestStat label={t('common.total')} count={total} color="var(--accent)" />
       </div>
       {total > 0 && (
         <div className="card-surface" style={{ padding: 16, minWidth: 200 }}>
@@ -1220,138 +1238,9 @@ function TestsTab({ detail }: { detail: BuildDetailData }) {
               marginTop: 8, textAlign: 'center', fontSize: 11, fontWeight: 500, color: 'var(--error)',
               background: 'rgba(239,68,68,0.1)', padding: '3px 8px', borderRadius: 'var(--radius-pill)',
             }}>
-              {failed} test{failed !== 1 ? 's' : ''} failed
+              {t('build.tests_failed_count').replace('{count}', String(failed))}
             </div>
           )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ErrorLogViewer({ buildResultKey }: { buildResultKey: string }) {
-  const [fullLog, setFullLog] = useState<string>('')
-  const [loading, setLoading] = useState(true)
-  const [showLog, setShowLog] = useState(false)
-  const logEndRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    window.bamboo.getFullBuildLog(buildResultKey).then((log) => {
-      setFullLog(log ?? '')
-      setLoading(false)
-    }).catch(() => setLoading(false))
-  }, [buildResultKey])
-
-  useEffect(() => {
-    if (showLog && logEndRef.current) {
-      logEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }
-  }, [showLog, fullLog])
-
-  if (loading) return <div style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>Loading build log...</div>
-  if (!fullLog) return <div style={{ color: 'var(--text-quaternary)', fontSize: 12 }}>No log data available</div>
-
-  const lines = fullLog.split('\n')
-  const errorLines = lines.filter((l) => /ERROR|FAILURE|FAILED|Exception|BUILD FAILURE|exit code [1-9]/i.test(l))
-  const warningLines = lines.filter((l) => /WARN(?:ING)?[:\s]/i.test(l))
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          fontSize: 12, fontWeight: 510, color: 'var(--error)',
-          background: 'rgba(239,68,68,0.1)', padding: '4px 10px', borderRadius: 'var(--radius-pill)',
-        }}>
-          <AlertTriangle size={12} /> {errorLines.length} error{errorLines.length !== 1 ? 's' : ''}
-        </span>
-        {warningLines.length > 0 && (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            fontSize: 12, fontWeight: 510, color: 'var(--warning)',
-            background: 'rgba(245,158,11,0.1)', padding: '4px 10px', borderRadius: 'var(--radius-pill)',
-          }}>
-            <AlertTriangle size={12} /> {warningLines.length} warning{warningLines.length !== 1 ? 's' : ''}
-          </span>
-        )}
-        <span style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>
-          {lines.length} lines total
-        </span>
-        <button
-          onClick={() => setShowLog(!showLog)}
-          className="btn-ghost"
-          style={{ fontSize: 12, padding: '4px 10px', marginLeft: 'auto' }}
-        >
-          {showLog ? 'Collapse' : 'Show full log'}
-        </button>
-      </div>
-
-      {errorLines.length > 0 && (
-        <div style={{
-          background: 'rgba(239, 68, 68, 0.06)', border: '1px solid rgba(239, 68, 68, 0.15)',
-          borderRadius: 'var(--radius-md)', padding: '12px 16px', minWidth: 0,
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 510, color: 'var(--error)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Error Summary
-          </div>
-          {errorLines.slice(0, 5).map((line, i) => (
-            <div key={i} style={{
-              fontSize: 12, fontFamily: 'monospace', color: 'var(--error)', lineHeight: 1.7,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere',
-            }}>
-              {line}
-            </div>
-          ))}
-          {errorLines.length > 5 && (
-            <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 4 }}>
-              ...and {errorLines.length - 5} more error lines
-            </div>
-          )}
-        </div>
-      )}
-
-      {showLog && (
-        <div style={{
-          background: 'var(--bg-page)', border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md)', padding: 0, overflow: 'hidden', minWidth: 0,
-        }}>
-          <div style={{
-            padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0,
-          }}>
-            <span style={{ fontSize: 11, fontWeight: 510, color: 'var(--text-quaternary)', textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>
-              Full Build Log
-            </span>
-            <span className="truncate" style={{ fontSize: 11, color: 'var(--text-quaternary)', textAlign: 'right' }}>
-              Last updated: {new Date().toLocaleString()}
-            </span>
-          </div>
-          <div style={{
-            padding: '12px 16px', fontSize: 11, fontFamily: 'monospace',
-            lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere',
-            color: 'var(--text-secondary)', overscrollBehavior: 'contain',
-          }}>
-            {lines.map((line, i) => {
-              let bgColor = 'transparent'
-              let color = 'var(--text-secondary)'
-              if (/ERROR|FAILURE|FAILED|Exception|BUILD FAILURE|exit code [1-9]/i.test(line)) {
-                color = 'var(--error)'
-                bgColor = 'rgba(239,68,68,0.08)'
-              } else if (/WARN(?:ING)?[:\s]/i.test(line)) {
-                color = 'var(--warning)'
-                bgColor = 'rgba(245,158,11,0.06)'
-              } else if (/SUCCESS|PASSED|BUILD SUCCEEDED|Completed/i.test(line)) {
-                color = 'var(--success)'
-                bgColor = 'rgba(39,166,68,0.06)'
-              }
-              return (
-                <div key={i} style={{ color, background: bgColor, padding: '0 4px', borderRadius: 2, minHeight: '1.6em' }}>
-                  {line || ' '}
-                </div>
-              )
-            })}
-            <div ref={logEndRef} />
-          </div>
         </div>
       )}
     </div>
@@ -1390,8 +1279,8 @@ function HistoryTab({
   onNavigate?: (buildResultKey: string) => void
 }) {
   const { t } = useI18n()
-  if (loading) return <LoadingSpinner text="Loading plan history..." />
-  if (!results.length) return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>No build history available</div>
+  if (loading) return <LoadingSpinner text={t('build.history_loading')} />
+  if (!results.length) return <div style={{ color: 'var(--text-quaternary)', padding: 32, textAlign: 'center' }}>{t('build.no_history')}</div>
 
   const chartData = results
     .filter((r) => r.buildDurationInSeconds && r.buildDurationInSeconds > 0)
@@ -1417,7 +1306,7 @@ function HistoryTab({
               <YAxis tick={{ fontSize: 10, fill: 'var(--text-quaternary)' }} unit="s" width={40} />
               <Tooltip
                 contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)', borderRadius: 8, fontSize: 12 }}
-                formatter={(v) => [`${v}s`, 'Duration']}
+                formatter={(v) => [`${v}s`, t('build.duration')]}
               />
               <Line type="monotone" dataKey="duration" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: '#3b82f6' }} activeDot={{ r: 5 }} />
             </LineChart>
@@ -1425,7 +1314,7 @@ function HistoryTab({
         </div>
       )}
 
-      <SectionTitle><List size={12} /> Plan Results ({results.length})</SectionTitle>
+      <SectionTitle><List size={12} /> {t('build.plan_results').replace('{count}', String(results.length))}</SectionTitle>
       {results.map((r, i) => {
         const isCurrent = r.buildResultKey === currentKey
         const running = isBuildRunning(r)

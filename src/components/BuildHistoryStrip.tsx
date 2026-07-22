@@ -6,6 +6,7 @@ import {
   type BuildStatusKind,
   type PlanBuildSnapshot,
 } from '../lib/bamboo-build'
+import { useI18n } from '../lib/i18n'
 
 interface Props {
   builds: PlanBuildSnapshot[]
@@ -14,26 +15,27 @@ interface Props {
   onSelect: (buildResultKey: string) => void
 }
 
-const KIND_STYLE: Record<BuildStatusKind, { bg: string; color: string; title: string }> = {
-  success: { bg: '#22c55e', color: '#fff', title: 'Successful' },
-  failed: { bg: '#ef4444', color: '#fff', title: 'Failed' },
-  cancelled: { bg: '#94a3b8', color: '#fff', title: 'Stopped / Not built' },
-  queued: { bg: '#f59e0b', color: '#fff', title: 'Queued' },
-  running: { bg: '#5e6ad2', color: '#fff', title: 'In progress' },
-  unknown: { bg: '#64748b', color: '#fff', title: 'Unknown' },
+const KIND_STYLE: Record<BuildStatusKind, { bg: string; glow: string; titleKey: string }> = {
+  success: { bg: 'linear-gradient(145deg, #34d399 0%, #16a34a 100%)', glow: 'rgba(34,197,94,0.35)', titleKey: 'status.success' },
+  failed: { bg: 'linear-gradient(145deg, #f87171 0%, #dc2626 100%)', glow: 'rgba(239,68,68,0.35)', titleKey: 'status.failed' },
+  cancelled: { bg: 'linear-gradient(145deg, #cbd5e1 0%, #94a3b8 100%)', glow: 'rgba(148,163,184,0.3)', titleKey: 'status.cancelled' },
+  queued: { bg: 'linear-gradient(145deg, #fbbf24 0%, #d97706 100%)', glow: 'rgba(245,158,11,0.35)', titleKey: 'status.queued' },
+  running: { bg: 'linear-gradient(145deg, #818cf8 0%, #4f46e5 100%)', glow: 'rgba(94,106,210,0.4)', titleKey: 'status.in_progress' },
+  unknown: { bg: 'linear-gradient(145deg, #94a3b8 0%, #64748b 100%)', glow: 'rgba(100,116,139,0.3)', titleKey: 'status.unknown' },
 }
 
 function StatusIcon({ kind }: { kind: BuildStatusKind }) {
-  const size = 11
-  if (kind === 'success') return <Check size={size} strokeWidth={3} />
-  if (kind === 'failed') return <X size={size} strokeWidth={3} />
-  if (kind === 'cancelled') return <Ban size={size} strokeWidth={2.5} />
-  if (kind === 'queued') return <Clock size={size} strokeWidth={2.5} />
-  if (kind === 'running') return <Loader2 size={size} strokeWidth={2.5} className="animate-spin" />
-  return <Ban size={size} strokeWidth={2.5} />
+  const size = 12
+  if (kind === 'success') return <Check size={size} strokeWidth={2.75} />
+  if (kind === 'failed') return <X size={size} strokeWidth={2.75} />
+  if (kind === 'cancelled') return <Ban size={size} strokeWidth={2.25} />
+  if (kind === 'queued') return <Clock size={size} strokeWidth={2.25} />
+  if (kind === 'running') return <Loader2 size={size} strokeWidth={2.25} className="animate-spin" />
+  return <Ban size={size} strokeWidth={2.25} />
 }
 
 export default function BuildHistoryStrip({ builds, currentKey, planKey, onSelect }: Props) {
+  const { t } = useI18n()
   const scrollerRef = useRef<HTMLDivElement>(null)
   const [canScrollLeft, setCanScrollLeft] = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -81,8 +83,8 @@ export default function BuildHistoryStrip({ builds, currentKey, planKey, onSelec
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 4,
-      marginTop: 12, padding: '6px 4px',
+      display: 'flex', alignItems: 'center', gap: 2,
+      marginTop: 12, padding: '4px 6px',
       background: 'var(--bg-surface)',
       borderRadius: 'var(--radius-md)',
       boxShadow: 'var(--ring-border)',
@@ -93,21 +95,24 @@ export default function BuildHistoryStrip({ builds, currentKey, planKey, onSelec
         onClick={() => scrollBy(-120)}
         disabled={!canScrollLeft}
         style={{
-          width: 24, height: 24, flexShrink: 0, border: 'none', borderRadius: 6,
+          width: 28, height: 28, flexShrink: 0, border: 'none', borderRadius: 8,
           background: 'transparent', color: canScrollLeft ? 'var(--text-tertiary)' : 'var(--text-quaternary)',
           cursor: canScrollLeft ? 'pointer' : 'default', opacity: canScrollLeft ? 1 : 0.35,
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
         }}
-        aria-label="Scroll left"
+        aria-label={t('common.scroll_left')}
       >
-        <ChevronLeft size={14} />
+        <ChevronLeft size={15} />
       </button>
 
       <div
         ref={scrollerRef}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6, overflowX: 'auto',
-          flex: 1, minWidth: 0, scrollbarWidth: 'none', padding: '2px 0',
+          display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto',
+          flex: 1, minWidth: 0, scrollbarWidth: 'none',
+          padding: '10px 4px',
+          WebkitMaskImage: 'linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 8px), transparent)',
+          maskImage: 'linear-gradient(90deg, transparent, #000 8px, #000 calc(100% - 8px), transparent)',
         }}
       >
         {items.map((build) => {
@@ -120,18 +125,21 @@ export default function BuildHistoryStrip({ builds, currentKey, planKey, onSelec
               key={build.buildResultKey}
               type="button"
               data-current={isCurrent ? 'true' : 'false'}
-              title={`#${number} · ${style.title}`}
+              title={`#${number} · ${t(style.titleKey)}`}
               onClick={() => !isCurrent && onSelect(build.buildResultKey)}
               style={{
-                width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-                border: isCurrent ? '2px solid var(--accent)' : '2px solid transparent',
-                outline: isCurrent ? '2px solid rgba(94,106,210,0.35)' : 'none',
-                outlineOffset: 1,
-                background: style.bg, color: style.color,
+                width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                border: 'none',
+                background: style.bg,
+                color: '#fff',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: isCurrent ? 'default' : 'pointer', padding: 0,
-                boxShadow: isCurrent ? '0 0 0 1px var(--bg-surface)' : 'none',
-                transition: 'transform 0.12s ease',
+                cursor: isCurrent ? 'default' : 'pointer',
+                padding: 0,
+                boxShadow: isCurrent
+                  ? `0 0 0 2px var(--bg-surface), 0 0 0 4px var(--accent), 0 2px 8px ${style.glow}`
+                  : `inset 0 1px 0 rgba(255,255,255,0.28), 0 1px 3px ${style.glow}`,
+                transform: isCurrent ? 'scale(1.08)' : 'scale(1)',
+                transition: 'transform 0.15s ease, box-shadow 0.15s ease',
               }}
             >
               <StatusIcon kind={kind} />
@@ -145,14 +153,14 @@ export default function BuildHistoryStrip({ builds, currentKey, planKey, onSelec
         onClick={() => scrollBy(120)}
         disabled={!canScrollRight}
         style={{
-          width: 24, height: 24, flexShrink: 0, border: 'none', borderRadius: 6,
+          width: 28, height: 28, flexShrink: 0, border: 'none', borderRadius: 8,
           background: 'transparent', color: canScrollRight ? 'var(--text-tertiary)' : 'var(--text-quaternary)',
           cursor: canScrollRight ? 'pointer' : 'default', opacity: canScrollRight ? 1 : 0.35,
           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
         }}
-        aria-label="Scroll right"
+        aria-label={t('common.scroll_right')}
       >
-        <ChevronRight size={14} />
+        <ChevronRight size={15} />
       </button>
     </div>
   )

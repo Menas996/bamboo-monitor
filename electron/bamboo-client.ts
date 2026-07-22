@@ -742,34 +742,101 @@ export class BambooClient {
   }
 
   async getBuildLog(buildResultKey: string): Promise<string> {
-    try {
-      const cookieHeader = this.getCookieHeader()
-      const res = await fetch(`${this.baseUrl}/rest/api/latest/result/${buildResultKey}/log`, {
-        headers: {
-          Accept: 'text/plain',
-          ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
-        },
+    const full = await this.getFullBuildLog(buildResultKey)
+    return full ? full.slice(-2000) : ''
+  }
+
+  private logAuthHeaders(extra?: Record<string, string>): Record<string, string> {
+    return {
+      ...(extra ?? {}),
+      ...(this.authMethod === 'session'
+        ? { Cookie: this.getCookieHeader() }
+        : { Authorization: this.auth }),
+    }
+  }
+
+  private async fetchResultLogText(resultKey: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/rest/api/latest/result/${resultKey}/log`, {
+      headers: this.logAuthHeaders({ Accept: 'text/plain' }),
+    })
+    return res.ok ? await res.text() : ''
+  }
+
+  private async fetchDownloadBuildLog(jobResultKey: string): Promise<string> {
+    const jobPlanKey = jobResultKey.replace(/-\d+$/, '')
+    const res = await fetch(`${this.baseUrl}/download/${jobPlanKey}/build_logs/${jobResultKey}.log`, {
+      headers: this.logAuthHeaders({ Accept: 'text/plain,*/*' }),
+    })
+    if (!res.ok) return ''
+    const body = await res.text().catch(() => '')
+    return body.trim() ? body : ''
+  }
+
+  private formatLogEntries(data: Record<string, unknown> | null | undefined): string {
+    if (!data) return ''
+    const raw = (data.logEntries as { logEntry?: unknown } | undefined)?.logEntry
+    const entries = raw == null ? [] : Array.isArray(raw) ? raw : [raw]
+    return entries
+      .map((entry) => {
+        const row = entry as { unstyledLog?: string; log?: string }
+        return (row.unstyledLog ?? row.log ?? '').trimEnd()
       })
-      if (!res.ok) return ''
-      const text = await res.text()
-      // Extract last 2000 chars (where errors usually appear)
-      return text.slice(-2000)
+      .filter((line) => line.length > 0)
+      .join('\n')
+  }
+
+  private async fetchLogEntriesText(jobResultKey: string): Promise<string> {
+    try {
+      const data = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/result/${jobResultKey}?expand=logEntries&max-results=2000`
+      )
+      return this.formatLogEntries(data)
     } catch {
       return ''
     }
   }
 
+  private extractJobResultKeys(detail: Record<string, unknown> | null | undefined): string[] {
+    if (!detail) return []
+    const stagesRaw = (detail.stages as { stage?: unknown } | undefined)?.stage
+    const stages = stagesRaw == null ? [] : Array.isArray(stagesRaw) ? stagesRaw : [stagesRaw]
+    const keys: string[] = []
+    for (const stage of stages) {
+      const resultsRaw = (stage as { results?: { result?: unknown } })?.results?.result
+      const results = resultsRaw == null ? [] : Array.isArray(resultsRaw) ? resultsRaw : [resultsRaw]
+      for (const result of results) {
+        const key = (result as { key?: string })?.key
+        if (typeof key === 'string' && key.trim()) keys.push(key.trim())
+      }
+    }
+    return [...new Set(keys)]
+  }
+
+  private async fetchJobLogText(jobKey: string): Promise<string> {
+    const download = await this.fetchDownloadBuildLog(jobKey)
+    if (download) return download
+    const entries = await this.fetchLogEntriesText(jobKey)
+    if (entries) return entries
+    return this.fetchResultLogText(jobKey)
+  }
+
   async getFullBuildLog(buildResultKey: string): Promise<string> {
     try {
-      const cookieHeader = this.getCookieHeader()
-      const res = await fetch(`${this.baseUrl}/rest/api/latest/result/${buildResultKey}/log`, {
-        headers: {
-          Accept: 'text/plain',
-          ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
-        },
-      })
-      if (!res.ok) return ''
-      return await res.text()
+      const direct = await this.fetchResultLogText(buildResultKey)
+      if (direct) return direct
+
+      const detail = await this.request<Record<string, unknown>>(
+        `/rest/api/latest/result/${buildResultKey}?expand=stages.stage.results`
+      )
+      const jobKeys = this.extractJobResultKeys(detail)
+      if (jobKeys.length === 0) return ''
+
+      const parts: string[] = []
+      for (const jobKey of jobKeys) {
+        const text = await this.fetchJobLogText(jobKey)
+        if (text) parts.push(`===== ${jobKey} =====\n${text}`)
+      }
+      return parts.join('\n\n')
     } catch {
       return ''
     }
