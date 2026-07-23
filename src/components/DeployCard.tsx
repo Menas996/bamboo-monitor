@@ -43,12 +43,15 @@ export default function DeployCard({
 
   return (
     <div
-      className="card-surface"
-      style={{ cursor: buildKey ? 'pointer' : 'default' }}
+      className="geist-card"
+      style={{
+        cursor: buildKey ? 'pointer' : 'default',
+        padding: '14px 16px',
+      }}
       onClick={() => buildKey && onOpenBuild?.(buildKey)}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
           {canFavorite && (
             <button
               onClick={(e) => { e.stopPropagation(); onToggleFavorite() }}
@@ -65,37 +68,41 @@ export default function DeployCard({
             </button>
           )}
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, minWidth: 0 }}>
               <span className="truncate" style={{
-                fontSize: 14, fontWeight: 510, color: 'var(--text-primary)', flex: '1 1 auto',
+                fontSize: 14, fontWeight: 550, color: 'var(--text-primary)', flex: '1 1 auto',
               }} title={planName}>
                 {planName}
               </span>
               <span className="truncate" style={{
-                fontSize: 12, color: 'var(--text-quaternary)', fontFamily: 'monospace', flex: '0 1 auto', maxWidth: '36%',
+                fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'monospace',
+                background: 'rgba(255, 255, 255, 0.04)', padding: '2px 6px', borderRadius: 'var(--radius-sm)',
+                boxShadow: 'var(--ring-border)', flex: '0 1 auto', maxWidth: '36%',
               }} title={planKey}>
                 {planKey}
               </span>
               {buildKey && (
-                <span style={{ fontSize: 11, color: 'var(--text-quaternary)', fontFamily: 'monospace', flexShrink: 0 }}>
+                <span style={{
+                  fontSize: 11, color: 'var(--text-quaternary)', fontFamily: 'monospace', flexShrink: 0,
+                }}>
                   #{displayBuildNumber ?? deploy.deployment?.id ?? ''}
                 </span>
               )}
             </div>
-            <div className="truncate" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
-              {deploy.project.key}
+            <div className="truncate" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+              {deploy.project.name || deploy.project.key}
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '0 1 auto', minWidth: 0, maxWidth: '42%' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '0 1 auto', minWidth: 0, maxWidth: '45%' }}>
           <div style={{ fontSize: 12, color: 'var(--text-quaternary)', textAlign: 'right', minWidth: 0, overflow: 'hidden' }}>
             {triggerBy && (
-              <div className="truncate" title={triggerBy}>
+              <div className="truncate" style={{ color: 'var(--text-secondary)' }} title={triggerBy}>
                 {triggerBy}
               </div>
             )}
-            {timeLabel && <div className="truncate" title={timeLabel}>{timeLabel}</div>}
+            {timeLabel && <div className="truncate" style={{ fontSize: 11 }} title={timeLabel}>{timeLabel}</div>}
           </div>
           {isDeploying ? (
             <StatusBadge status="InProgress" />
@@ -109,4 +116,5 @@ export default function DeployCard({
       </div>
     </div>
   )
+
 }

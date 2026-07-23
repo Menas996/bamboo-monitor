@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useI18n } from '../lib/i18n'
-import { useNavigate } from './routes'
+import { useNavigate, useRoute } from './routes'
+
 import DeployCard from '../components/DeployCard'
+import DeployListRow from '../components/DeployListRow'
 import ProjectTree from '../components/ProjectTree'
 import FavoritePlanList, { type FavoritePlan, type PlanLiveStatus } from '../components/FavoritePlanList'
 import LoadingSpinner from '../components/LoadingSpinner'
@@ -9,7 +11,8 @@ import {
   normalizePlanResults, pickPlanBuildResult, isBuildRunning, dedupeDeploysByPlan,
   buildNumberFromResultKey,
 } from '../lib/bamboo-build'
-import { Search, ChevronLeft, ChevronRight, Star, List } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, Star, List, LayoutGrid } from 'lucide-react'
+
 
 interface DeployProject {
   key: string
@@ -74,10 +77,15 @@ function deployToFavorite(deploy: DeployData, projectKey: string): FavoritePlan 
 export default function Dashboard() {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const route = useRoute()
+  const isActive = route.page === 'dashboard'
   const [projects, setProjects] = useState<DeployProject[]>([])
+
   const [favorites, setFavorites] = useState<FavoritePlan[]>([])
   const [buildTab, setBuildTab] = useState<'all' | 'favorites'>('all')
+  const [viewMode, setViewMode] = useState<'grid' | 'compact'>('grid')
   const [selectedProject, setSelectedProject] = useState<string | null>(null)
+
   const [deploys, setDeploys] = useState<DeployData[]>([])
   const [loading, setLoading] = useState(true)
   const [deployLoading, setDeployLoading] = useState(false)
@@ -205,8 +213,7 @@ export default function Dashboard() {
   }, [])
 
   useEffect(() => {
-    if (favorites.length === 0) {
-      setPlanStatus({})
+    if (favorites.length === 0 || !isActive) {
       return
     }
     let cancelled = false
@@ -239,7 +246,8 @@ export default function Dashboard() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [favorites])
+  }, [favorites, isActive])
+
 
   async function restartPoll(nextFavorites: FavoritePlan[]) {
     const interval = (await window.config.get('pollInterval')) ?? 30
@@ -309,6 +317,15 @@ export default function Dashboard() {
       p.name.toLowerCase().includes(q) || p.key.toLowerCase().includes(q)
     )
   }, [projects, searchQuery])
+
+  useEffect(() => {
+    if (!searchQuery || !selectedProject) return
+    const isSelectedInFiltered = filteredProjects.some((p) => p.key === selectedProject)
+    if (!isSelectedInFiltered) {
+      setSelectedProject(filteredProjects[0]?.key ?? null)
+    }
+  }, [searchQuery, filteredProjects, selectedProject])
+
 
   const totalPages = Math.ceil(filteredProjects.length / PAGE_SIZE)
   const paginatedProjects = filteredProjects.slice(projectPage * PAGE_SIZE, (projectPage + 1) * PAGE_SIZE)
@@ -438,20 +455,41 @@ export default function Dashboard() {
               {favorites.length} {t('dashboard.favorites_polling')}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <BuildTab
-              active={buildTab === 'all'}
-              icon={List}
-              label={t('dashboard.tab.builds_all')}
-              onClick={() => setBuildTab('all')}
-            />
-            <BuildTab
-              active={buildTab === 'favorites'}
-              icon={Star}
-              label={t('dashboard.tab.builds_favorites')}
-              count={favorites.length}
-              onClick={() => setBuildTab('favorites')}
-            />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            <div style={{
+              display: 'flex', background: 'var(--bg-surface)', padding: 2,
+              borderRadius: 'var(--radius-md)', boxShadow: 'var(--ring-border)',
+            }}>
+              <button
+                className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
+                onClick={() => setViewMode('grid')}
+                title="Grid view"
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                className={`view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}`}
+                onClick={() => setViewMode('compact')}
+                title="Compact view"
+              >
+                <List size={15} />
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <BuildTab
+                active={buildTab === 'all'}
+                icon={List}
+                label={t('dashboard.tab.builds_all')}
+                onClick={() => setBuildTab('all')}
+              />
+              <BuildTab
+                active={buildTab === 'favorites'}
+                icon={Star}
+                label={t('dashboard.tab.builds_favorites')}
+                count={favorites.length}
+                onClick={() => setBuildTab('favorites')}
+              />
+            </div>
           </div>
         </div>
 
@@ -522,27 +560,50 @@ export default function Dashboard() {
                 <p style={{ fontSize: 12, color: 'var(--text-quaternary)', marginBottom: 12 }}>
                   {t('dashboard.deploy_latest_per_plan')}
                 </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: viewMode === 'compact' ? 6 : 8 }}>
                   {paginatedDeploys.map((d, i) => {
                     const fav = selectedProject ? deployToFavorite(d, selectedProject) : null
                     const planKey = fav?.planKey ?? d.plan?.key ?? d.environment.key
                     const live = planKey ? planStatus[planKey] : undefined
+                    const cardKey = `${planKey}-${live?.buildResultKey ?? d.buildResultKey ?? i}`
+                    const isFav = planKey ? favoriteKeys.has(planKey) : false
+                    const isRunning = !!live?.isRunning
+                    const bNumber = live?.buildNumber ?? d.deployment?.id
+
+                    if (viewMode === 'compact') {
+                      return (
+                        <DeployListRow
+                          key={cardKey}
+                          deploy={d}
+                          isFavorite={isFav}
+                          isDeploying={isRunning}
+                          displayBuildNumber={bNumber}
+                          onToggleFavorite={fav ? () => toggleFavorite(fav) : undefined}
+                          onOpenBuild={(key) => {
+                            const openKey = isRunning && live?.buildResultKey ? live.buildResultKey : key
+                            navigate({ page: 'build', buildResultKey: openKey })
+                          }}
+                        />
+                      )
+                    }
+
                     return (
                       <DeployCard
-                        key={`${planKey}-${live?.buildResultKey ?? d.buildResultKey ?? i}`}
+                        key={cardKey}
                         deploy={d}
-                        isFavorite={planKey ? favoriteKeys.has(planKey) : false}
-                        isDeploying={!!live?.isRunning}
-                        displayBuildNumber={live?.buildNumber ?? d.deployment?.id}
+                        isFavorite={isFav}
+                        isDeploying={isRunning}
+                        displayBuildNumber={bNumber}
                         onToggleFavorite={fav ? () => toggleFavorite(fav) : undefined}
                         onOpenBuild={(key) => {
-                          const openKey = live?.isRunning && live.buildResultKey ? live.buildResultKey : key
+                          const openKey = isRunning && live?.buildResultKey ? live.buildResultKey : key
                           navigate({ page: 'build', buildResultKey: openKey })
                         }}
                       />
                     )
                   })}
                 </div>
+
 
                 {(deployTotalPages > 1 || deployHasMore) && (
                   <div style={{

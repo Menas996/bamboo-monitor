@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { AlertTriangle, FileText, RefreshCw } from 'lucide-react'
+import { AlertTriangle, FileText, RefreshCw, Search, Copy, Download, Hash } from 'lucide-react'
 import { useI18n } from '../lib/i18n'
+
 
 const LIVE_POLL_MS = 4000
 const ERROR_RE = /ERROR|FAILURE|FAILED|Exception|BUILD FAILURE|exit code [1-9]/i
@@ -46,8 +47,31 @@ export default function BuildLogViewer({
   const [refreshing, setRefreshing] = useState(false)
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
+  const [logFilter, setLogFilter] = useState<'all' | 'error' | 'warning'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showLineNumbers, setShowLineNumbers] = useState(true)
+  const [copied, setCopied] = useState(false)
   const stickToBottomRef = useRef(true)
   const scrollBoxRef = useRef<HTMLDivElement>(null)
+
+  function handleCopy() {
+    if (!fullLog) return
+    navigator.clipboard.writeText(fullLog)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  function handleDownload() {
+    if (!fullLog) return
+    const blob = new Blob([fullLog], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `build-${buildResultKey}-log.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
 
   async function fetchLog(isRefresh = false) {
     if (isRefresh) setRefreshing(true)
@@ -118,6 +142,15 @@ export default function BuildLogViewer({
   const warningCount = lineKinds.reduce((count, kind) => count + (kind === 'warning' ? 1 : 0), 0)
   const errorPreview = lines.filter((_, index) => lineKinds[index] === 'error').slice(0, 5)
 
+  const filteredLinesCount = lines.filter((line, index) => {
+    const kind = lineKinds[index]
+    if (logFilter === 'error' && kind !== 'error') return false
+    if (logFilter === 'warning' && kind !== 'warning') return false
+    if (searchQuery && !line.toLowerCase().includes(searchQuery.toLowerCase())) return false
+    return true
+  }).length
+
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 10,
@@ -157,9 +190,30 @@ export default function BuildLogViewer({
           </span>
         )}
         <span style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>
-          {lines.length} {t('build.log_lines')}
+          {filteredLinesCount < lines.length ? `${filteredLinesCount} / ${lines.length} lines` : `${lines.length} lines`}
         </span>
+
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={handleCopy}
+            title="Copy log to clipboard"
+            className="btn-ghost"
+            style={{ fontSize: 12, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <Copy size={12} />
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            title="Download full log"
+            className="btn-ghost"
+            style={{ fontSize: 12, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+          >
+            <Download size={12} />
+            Download
+          </button>
           <button
             type="button"
             onClick={() => void fetchLog(true)}
@@ -223,19 +277,60 @@ export default function BuildLogViewer({
         }}>
           <div style={{
             padding: '6px 12px', borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexShrink: 0,
+            background: 'var(--bg-surface)', flexWrap: 'wrap',
           }}>
-            <span style={{
-              fontSize: 11, fontWeight: 510, color: 'var(--text-quaternary)',
-              textTransform: 'uppercase', letterSpacing: '0.05em',
-            }}>
-              {t('build.log_full')}
-            </span>
-            {fetchedAt && (
-              <span className="truncate" style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>
-                {t('build.log_updated')}: {new Date(fetchedAt).toLocaleTimeString()}
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                className={`filter-pill ${logFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setLogFilter('all')}
+                style={{ padding: '3px 8px', fontSize: 11 }}
+              >
+                All
+              </button>
+              <button
+                className={`filter-pill ${logFilter === 'error' ? 'active' : ''}`}
+                onClick={() => setLogFilter('error')}
+                style={{ padding: '3px 8px', fontSize: 11, color: logFilter === 'error' ? 'var(--error)' : undefined }}
+              >
+                Errors ({errorCount})
+              </button>
+              <button
+                className={`filter-pill ${logFilter === 'warning' ? 'active' : ''}`}
+                onClick={() => setLogFilter('warning')}
+                style={{ padding: '3px 8px', fontSize: 11, color: logFilter === 'warning' ? 'var(--warning)' : undefined }}
+              >
+                Warnings ({warningCount})
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                <input
+                  className="input-linear"
+                  placeholder="Search logs..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ fontSize: 11, padding: '3px 8px 3px 26px', width: 140 }}
+                />
+              </div>
+
+              <button
+                onClick={() => setShowLineNumbers(!showLineNumbers)}
+                title="Toggle line numbers"
+                className={`view-toggle-btn ${showLineNumbers ? 'active' : ''}`}
+                style={{ width: 26, height: 26 }}
+              >
+                <Hash size={13} />
+              </button>
+
+              {fetchedAt && (
+                <span className="truncate" style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>
+                  {new Date(fetchedAt).toLocaleTimeString()}
+                </span>
+              )}
+            </div>
           </div>
           <div
             ref={scrollBoxRef}
@@ -243,28 +338,47 @@ export default function BuildLogViewer({
             onWheel={onWheel}
             style={{
               flex: 1, minHeight: 0, height: fill ? 0 : undefined, overflow: 'auto',
-              overscrollBehavior: 'contain', padding: '8px 0',
+              overscrollBehavior: 'contain', padding: '6px 0',
               fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
               lineHeight: 1.55, color: 'var(--text-secondary)',
             }}
           >
-            {lines.map((line, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '1px 12px',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  overflowWrap: 'anywhere',
-                  ...LOG_LINE_STYLE[lineKinds[index]],
-                }}
-              >
-                {line || '\u00A0'}
-              </div>
-            ))}
+            {lines.map((line, index) => {
+              const kind = lineKinds[index]
+              if (logFilter === 'error' && kind !== 'error') return null
+              if (logFilter === 'warning' && kind !== 'warning') return null
+              if (searchQuery && !line.toLowerCase().includes(searchQuery.toLowerCase())) return null
+
+              return (
+                <div
+                  key={index}
+                  style={{
+                    padding: '1px 12px',
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    gap: 12,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'anywhere',
+                    ...LOG_LINE_STYLE[kind],
+                  }}
+                >
+                  {showLineNumbers && (
+                    <span style={{
+                      display: 'inline-block', width: 36, flexShrink: 0, textAlign: 'right',
+                      color: 'var(--text-quaternary)', userSelect: 'none', fontSize: 10,
+                    }}>
+                      {index + 1}
+                    </span>
+                  )}
+                  <span style={{ flex: 1 }}>{line || '\u00A0'}</span>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
+
     </div>
   )
 }

@@ -604,16 +604,39 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
       )}
       {/* Header */}
       <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border-subtle)', flexShrink: 0 }}>
-        <button
-          onClick={goBack}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
-            color: 'var(--text-tertiary)', fontSize: 13, cursor: 'pointer', marginBottom: 12,
-            fontFamily: 'inherit', fontFeatureSettings: '"cv01", "ss03"', padding: 0,
-          }}
-        >
-          <ArrowLeft size={14} /> {t('nav.dashboard')}
-        </button>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12,
+          fontSize: 13, color: 'var(--text-tertiary)', flexWrap: 'wrap',
+        }}>
+
+          <button
+            onClick={goBack}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none',
+              color: 'var(--text-tertiary)', fontSize: 13, cursor: 'pointer',
+              fontFamily: 'inherit', fontFeatureSettings: '"cv01", "ss03"', padding: 0,
+              transition: 'color 0.15s ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-tertiary)' }}
+          >
+            <ArrowLeft size={14} /> {t('nav.dashboard')}
+          </button>
+          <span>/</span>
+          {detail.projectName && (
+            <>
+              <span style={{ color: 'var(--text-secondary)' }}>{detail.projectName}</span>
+              <span>/</span>
+            </>
+          )}
+          <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+            {detail.planName ?? detail.plan?.name ?? routePlanKey}
+          </span>
+          <span>/</span>
+          <span style={{ fontFamily: 'monospace', color: 'var(--text-quaternary)' }}>
+            #{displayBuildNumber}
+          </span>
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', minWidth: 0 }}>
           <div style={{ minWidth: 0, flex: '1 1 200px' }}>
@@ -625,6 +648,7 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, flexWrap: 'wrap' }}>
+
             {actionMsg && (
               <span style={{
                 fontSize: 12, padding: '4px 10px', borderRadius: 'var(--radius-pill)',
