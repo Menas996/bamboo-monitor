@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { AlertTriangle, FileText, RefreshCw } from 'lucide-react'
 import { useI18n } from '../lib/i18n'
 
@@ -6,6 +6,26 @@ const LIVE_POLL_MS = 4000
 const ERROR_RE = /ERROR|FAILURE|FAILED|Exception|BUILD FAILURE|exit code [1-9]/i
 const WARN_RE = /WARN(?:ING)?[:\s]/i
 const DEFAULT_PANEL_HEIGHT = 420
+
+function logLineKind(line: string): 'error' | 'warning' | 'normal' {
+  if (ERROR_RE.test(line)) return 'error'
+  if (WARN_RE.test(line)) return 'warning'
+  return 'normal'
+}
+
+const LOG_LINE_STYLE: Record<'error' | 'warning' | 'normal', CSSProperties> = {
+  error: {
+    color: 'var(--error)',
+    background: 'rgba(239, 68, 68, 0.08)',
+    boxShadow: 'inset 2px 0 0 var(--error)',
+  },
+  warning: {
+    color: 'var(--warning)',
+    background: 'rgba(245, 158, 11, 0.08)',
+    boxShadow: 'inset 2px 0 0 var(--warning)',
+  },
+  normal: {},
+}
 
 interface Props {
   buildResultKey: string
@@ -93,9 +113,10 @@ export default function BuildLogViewer({
   }
 
   const lines = fullLog.split('\n')
-  const errorCount = lines.reduce((count, line) => count + (ERROR_RE.test(line) ? 1 : 0), 0)
-  const warningCount = lines.reduce((count, line) => count + (WARN_RE.test(line) ? 1 : 0), 0)
-  const errorPreview = lines.filter((line) => ERROR_RE.test(line)).slice(0, 5)
+  const lineKinds = lines.map(logLineKind)
+  const errorCount = lineKinds.reduce((count, kind) => count + (kind === 'error' ? 1 : 0), 0)
+  const warningCount = lineKinds.reduce((count, kind) => count + (kind === 'warning' ? 1 : 0), 0)
+  const errorPreview = lines.filter((_, index) => lineKinds[index] === 'error').slice(0, 5)
 
   return (
     <div style={{
@@ -222,17 +243,25 @@ export default function BuildLogViewer({
             onWheel={onWheel}
             style={{
               flex: 1, minHeight: 0, height: fill ? 0 : undefined, overflow: 'auto',
-              overscrollBehavior: 'contain', padding: '10px 12px',
+              overscrollBehavior: 'contain', padding: '8px 0',
               fontSize: 11, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
               lineHeight: 1.55, color: 'var(--text-secondary)',
             }}
           >
-            <pre style={{
-              margin: 0, font: 'inherit', whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word', overflowWrap: 'anywhere',
-            }}>
-              {fullLog}
-            </pre>
+            {lines.map((line, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: '1px 12px',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                  ...LOG_LINE_STYLE[lineKinds[index]],
+                }}
+              >
+                {line || '\u00A0'}
+              </div>
+            ))}
           </div>
         </div>
       )}

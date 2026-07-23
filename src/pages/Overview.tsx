@@ -3,7 +3,7 @@ import { useI18n } from '../lib/i18n'
 import { useNavigate } from './routes'
 import StatusBadge from '../components/StatusBadge'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { normalizePlanResults, pickPlanBuildResult, isBuildRunning, buildNumberFromResultKey, statusBadgeKey } from '../lib/bamboo-build'
+import { normalizePlanResults, pickPlanBuildResult, isBuildRunning, buildNumberFromResultKey, statusBadgeKey, classifyBuildStatus } from '../lib/bamboo-build'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { BarChart3 } from 'lucide-react'
 
@@ -33,7 +33,6 @@ const CHART_COLORS = {
   blue: '#60a5fa',
   purple: '#a78bfa',
   amber: '#fbbf24',
-  palette: ['#60a5fa', '#a78bfa', '#34d399', '#fbbf24', '#f87171', '#818cf8', '#fb923c', '#2dd4bf'],
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -54,6 +53,38 @@ const tooltipStyle = {
 }
 
 const axisTick = { fontSize: 11, fill: 'var(--text-quaternary)' }
+
+function resolveDurationSeconds(raw: {
+  buildDurationInSeconds?: number
+  buildDuration?: number
+  startTime?: number
+  finishedDate?: number
+}): number | undefined {
+  if (typeof raw.buildDurationInSeconds === 'number' && raw.buildDurationInSeconds > 0) {
+    return raw.buildDurationInSeconds
+  }
+  if (typeof raw.buildDuration === 'number' && raw.buildDuration > 0) {
+    return Math.round(raw.buildDuration / 1000)
+  }
+  const { startTime, finishedDate } = raw
+  if (startTime && finishedDate && finishedDate > startTime) {
+    return Math.round((finishedDate - startTime) / 1000)
+  }
+  return undefined
+}
+
+function formatDurationSeconds(seconds: number): string {
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  return `${seconds}s`
+}
+
+function statusLabel(kind: string): string {
+  if (kind === 'Successful' || kind === 'SUCCESS' || kind === 'SUCCESSFUL') return 'Successful'
+  if (kind === 'Failed' || kind === 'FAILED' || kind === 'FAILURE') return 'Failed'
+  if (kind === 'InProgress' || kind === 'Queued') return 'In Progress'
+  if (kind === 'Cancelled') return 'Stopped'
+  return 'Unknown'
+}
 
 function useScrollReveal() {
   const ref = useRef<HTMLDivElement>(null)
@@ -115,6 +146,7 @@ export default function Overview() {
           const pick = pickPlanBuildResult(list)
           if (pick) {
             const rawPick = raw.find((r: any) => r.buildResultKey === pick.buildResultKey) ?? {}
+            const durationSeconds = resolveDurationSeconds(rawPick)
             snaps.push({
               planKey: fav.planKey, planName: fav.planName,
               buildResultKey: pick.buildResultKey,
@@ -123,7 +155,7 @@ export default function Overview() {
               lifeCycleState: pick.lifeCycleState ?? '',
               isRunning: isBuildRunning(pick),
               startTime: rawPick.startTime, buildDuration: rawPick.buildDuration,
-              buildDurationInSeconds: rawPick.buildDurationInSeconds,
+              buildDurationInSeconds: durationSeconds,
               buildReason: rawPick.buildReason ?? rawPick.reason,
             })
           }
@@ -135,7 +167,7 @@ export default function Overview() {
               buildState: r.buildState ?? 'Unknown',
               lifeCycleState: r.lifeCycleState ?? '',
               startTime: rawItem.startTime,
-              duration: rawItem.buildDurationInSeconds ?? (rawItem.buildDuration ? Math.round(rawItem.buildDuration / 1000) : undefined),
+              duration: resolveDurationSeconds(rawItem),
             })
           }
         } catch { /* ignore */ }
@@ -155,16 +187,32 @@ export default function Overview() {
   const statusData = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const s of snapshots) {
-      const kind = statusBadgeKey(s)
-      const label = kind === 'Successful' || kind === 'SUCCESS' || kind === 'SUCCESSFUL' ? 'Successful'
-        : kind === 'Failed' || kind === 'FAILED' || kind === 'FAILURE' ? 'Failed'
-        : kind === 'InProgress' || kind === 'Queued' ? 'In Progress'
-        : kind === 'Cancelled' ? 'Stopped'
-        : 'Unknown'
+      const label = statusLabel(statusBadgeKey(s))
       counts[label] = (counts[label] || 0) + 1
     }
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
   }, [snapshots])
+
+  const healthKpis = useMemo(() => {
+    const finished = timeline.filter((e) => {
+      const kind = classifyBuildStatus(e)
+      return kind === 'success' || kind === 'failed' || kind === 'cancelled'
+    })
+    const successCount = finished.filter((e) => classifyBuildStatus(e) === 'success').length
+    const failedCount = finished.filter((e) => classifyBuildStatus(e) === 'failed').length
+    const runningCount = snapshots.filter((s) => s.isRunning).length
+    const durations = timeline.map((e) => e.duration).filter((d): d is number => typeof d === 'number' && d > 0)
+    const avgDuration = durations.length
+      ? Math.round(durations.reduce((sum, d) => sum + d, 0) / durations.length)
+      : undefined
+    return {
+      sampleSize: finished.length,
+      successRate: finished.length ? Math.round((successCount / finished.length) * 100) : undefined,
+      failedCount,
+      runningCount,
+      avgDuration,
+    }
+  }, [timeline, snapshots])
 
   const durationData = useMemo(() => {
     return timeline
@@ -172,21 +220,32 @@ export default function Overview() {
       .slice(0, 20)
       .reverse()
       .map((e) => ({
-        name: `${e.planKey}-${e.buildNumber}`,
-        duration: e.duration,
+        name: `#${e.buildNumber}`,
+        planName: e.planName,
+        duration: e.duration as number,
         state: e.buildState,
       }))
   }, [timeline])
 
-  const planCountData = useMemo(() => {
-    const counts: Record<string, number> = {}
+  const planSuccessData = useMemo(() => {
+    const byPlan = new Map<string, { planName: string; success: number; total: number }>()
     for (const e of timeline) {
-      counts[e.planName] = (counts[e.planName] || 0) + 1
+      const kind = classifyBuildStatus(e)
+      if (kind !== 'success' && kind !== 'failed' && kind !== 'cancelled') continue
+      const row = byPlan.get(e.planKey) ?? { planName: e.planName, success: 0, total: 0 }
+      row.total += 1
+      if (kind === 'success') row.success += 1
+      byPlan.set(e.planKey, row)
     }
-    return Object.entries(counts)
-      .map(([name, value]) => ({ name: name.length > 16 ? name.slice(0, 14) + '…' : name, builds: value }))
-      .sort((a, b) => b.builds - a.builds)
-      .slice(0, 10)
+    return [...byPlan.entries()]
+      .map(([planKey, row]) => ({
+        planKey,
+        planName: row.planName,
+        rate: row.total ? Math.round((row.success / row.total) * 100) : 0,
+        success: row.success,
+        total: row.total,
+      }))
+      .sort((a, b) => a.rate - b.rate || b.total - a.total)
   }, [timeline])
 
   if (loading) return <LoadingSpinner text={t('app.loading')} />
@@ -232,7 +291,7 @@ export default function Overview() {
                   </div>
                   <div style={{ display: 'flex', gap: 12, fontSize: 12, color: 'var(--text-tertiary)', minWidth: 0, overflow: 'hidden' }}>
                     <span style={{ fontFamily: 'monospace', flexShrink: 0 }}>#{s.buildNumber}</span>
-                    {s.buildDurationInSeconds && <span style={{ flexShrink: 0 }}>{s.buildDurationInSeconds > 60 ? `${Math.floor(s.buildDurationInSeconds / 60)}m ${s.buildDurationInSeconds % 60}s` : `${s.buildDurationInSeconds}s`}</span>}
+                    {s.buildDurationInSeconds && <span style={{ flexShrink: 0 }}>{formatDurationSeconds(s.buildDurationInSeconds)}</span>}
                     {s.startTime && <span className="truncate" style={{ flex: '1 1 auto', textAlign: 'right' }}>{new Date(s.startTime).toLocaleString()}</span>}
                   </div>
                 </HoverCard>
@@ -273,7 +332,7 @@ export default function Overview() {
                   <span style={{ flexShrink: 0 }}><StatusBadge status={statusBadgeKey(e)} /></span>
                   {e.duration && (
                     <span style={{ fontSize: 11, color: 'var(--text-quaternary)', width: 50, textAlign: 'right', flexShrink: 0 }}>
-                      {e.duration > 60 ? `${Math.floor(e.duration / 60)}m${e.duration % 60}s` : `${e.duration}s`}
+                      {formatDurationSeconds(e.duration)}
                     </span>
                   )}
                 </div>
@@ -282,86 +341,135 @@ export default function Overview() {
           </section>
         </RevealSection>
 
-        {/* Section 3: Charts */}
+        {/* Section 3: Metrics */}
         <RevealSection delay={180}>
           <section>
             <SectionTitle>{t('overview.metrics')}</SectionTitle>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 16 }}>
+              <KpiCard
+                label={t('overview.kpi_success_rate')}
+                value={healthKpis.successRate != null ? `${healthKpis.successRate}%` : '—'}
+                hint={healthKpis.sampleSize ? t('overview.kpi_sample').replace('{count}', String(healthKpis.sampleSize)) : t('overview.chart_empty')}
+              />
+              <KpiCard
+                label={t('overview.kpi_avg_duration')}
+                value={healthKpis.avgDuration != null ? formatDurationSeconds(healthKpis.avgDuration) : '—'}
+                hint={t('overview.kpi_avg_duration_hint')}
+              />
+              <KpiCard
+                label={t('overview.kpi_failed')}
+                value={String(healthKpis.failedCount)}
+                hint={t('overview.kpi_failed_hint')}
+                accent={healthKpis.failedCount > 0 ? CHART_COLORS.failed : undefined}
+              />
+              <KpiCard
+                label={t('overview.kpi_running')}
+                value={String(healthKpis.runningCount)}
+                hint={t('overview.kpi_running_hint')}
+                accent={healthKpis.runningCount > 0 ? CHART_COLORS.blue : undefined}
+              />
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-
-              {/* Pie Chart — Status Distribution */}
               <div className="card-surface" style={{ padding: '20px 20px 16px' }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                  {t('overview.status_dist')}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-                  <div style={{ width: 140, height: 140, flexShrink: 0 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={statusData} dataKey="value"
-                          cx="50%" cy="50%"
-                          innerRadius={38} outerRadius={60}
-                          paddingAngle={4} strokeWidth={0}
-                        >
-                          {statusData.map((entry) => (
-                            <Cell key={entry.name} fill={STATUS_COLORS[entry.name] ?? CHART_COLORS.muted} />
-                          ))}
-                        </Pie>
-                        <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${v}`, name]} />
-                      </PieChart>
-                    </ResponsiveContainer>
+                <ChartTitle title={t('overview.status_dist')} hint={t('overview.status_dist_hint')} />
+                {statusData.length === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+                    <div style={{ width: 140, height: 140, flexShrink: 0 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={statusData} dataKey="value"
+                            cx="50%" cy="50%"
+                            innerRadius={38} outerRadius={60}
+                            paddingAngle={4} strokeWidth={0}
+                          >
+                            {statusData.map((entry) => (
+                              <Cell key={entry.name} fill={STATUS_COLORS[entry.name] ?? CHART_COLORS.muted} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${v}`, name]} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 0 }}>
+                      {statusData.map((entry) => (
+                        <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[entry.name] ?? CHART_COLORS.muted, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</span>
+                          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{entry.value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 0 }}>
-                    {statusData.map((entry) => (
-                      <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[entry.name] ?? CHART_COLORS.muted, flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</span>
-                        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{entry.value}</span>
+                )}
+              </div>
+
+              <div className="card-surface" style={{ padding: '20px 20px 12px' }}>
+                <ChartTitle title={t('overview.duration_trend')} hint={t('overview.duration_trend_hint')} />
+                {durationData.length === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={durationData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
+                      <XAxis dataKey="name" tick={axisTick} interval="preserveStartEnd" axisLine={false} tickLine={false} />
+                      <YAxis tick={axisTick} unit="s" width={36} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        cursor={{ fill: 'var(--bg-elevated)', radius: 4 }}
+                        contentStyle={tooltipStyle}
+                        formatter={(v) => [`${v}s`, t('build.duration')]}
+                        labelFormatter={(_, payload) => {
+                          const row = payload?.[0]?.payload as { planName?: string; name?: string } | undefined
+                          return row?.planName ? `${row.planName} ${row.name ?? ''}` : String(payload?.[0]?.payload?.name ?? '')
+                        }}
+                      />
+                      <Bar dataKey="duration" radius={[4, 4, 0, 0]} maxBarSize={24}>
+                        {durationData.map((entry, i) => {
+                          const kind = classifyBuildStatus({ buildState: entry.state })
+                          const fill = kind === 'failed' ? CHART_COLORS.failed : kind === 'success' ? CHART_COLORS.success : CHART_COLORS.blue
+                          return <Cell key={i} fill={fill} opacity={0.85} />
+                        })}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              <div className="card-surface" style={{ padding: '20px 20px 16px' }}>
+                <ChartTitle title={t('overview.plan_success_rate')} hint={t('overview.plan_success_rate_hint')} />
+                {planSuccessData.length === 0 ? (
+                  <EmptyChart />
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {planSuccessData.map((row) => (
+                      <div key={row.planKey} style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
+                          <span
+                            style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={row.planName}
+                          >
+                            {row.planName}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                            {row.rate}% · {row.success}/{row.total}
+                          </span>
+                        </div>
+                        <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-elevated)', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              width: `${row.rate}%`,
+                              height: '100%',
+                              borderRadius: 999,
+                              background: row.rate >= 80 ? CHART_COLORS.success : row.rate >= 50 ? CHART_COLORS.amber : CHART_COLORS.failed,
+                              transition: 'width 0.35s ease',
+                            }}
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
-                </div>
-              </div>
-
-              {/* Bar Chart — Duration Trend */}
-              <div className="card-surface" style={{ padding: '20px 20px 12px' }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                  {t('overview.duration_trend')}
-                </div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={durationData} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
-                    <XAxis dataKey="name" tick={axisTick} interval="preserveStartEnd" axisLine={false} tickLine={false} />
-                    <YAxis tick={axisTick} unit="s" width={36} axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{ fill: 'var(--bg-elevated)', radius: 4 }} contentStyle={tooltipStyle} formatter={(v) => [`${v}s`, 'Duration']} />
-                    <Bar dataKey="duration" radius={[4, 4, 0, 0]} maxBarSize={24}>
-                      {durationData.map((entry, i) => (
-                        <Cell key={i} fill={entry.state === 'Failed' ? CHART_COLORS.failed : entry.state === 'Successful' ? CHART_COLORS.success : CHART_COLORS.blue} opacity={0.85} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Bar Chart — Builds per Plan */}
-              <div className="card-surface" style={{ padding: '20px 20px 12px' }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                  {t('overview.plan_build_count')}
-                </div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={planCountData} layout="vertical" margin={{ top: 4, right: 12, bottom: 4, left: 4 }}>
-                    <XAxis type="number" tick={axisTick} axisLine={false} tickLine={false} />
-                    <YAxis
-                      type="category" dataKey="name" width={80} axisLine={false} tickLine={false}
-                      tick={{ ...axisTick, width: 72 }}
-                    />
-                    <Tooltip cursor={{ fill: 'var(--bg-elevated)', radius: 4 }} contentStyle={tooltipStyle} formatter={(v) => [`${v}`, 'Builds']} />
-                    <Bar dataKey="builds" radius={[0, 4, 4, 0]} maxBarSize={16}>
-                      {planCountData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS.palette[i % CHART_COLORS.palette.length]} opacity={0.8} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                )}
               </div>
             </div>
           </section>
@@ -379,6 +487,45 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
       display: 'flex', alignItems: 'center', gap: 8,
     }}>
       {children}
+    </div>
+  )
+}
+
+function ChartTitle({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>{title}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 4, lineHeight: 1.4 }}>{hint}</div>
+    </div>
+  )
+}
+
+function EmptyChart() {
+  const { t } = useI18n()
+  return (
+    <div style={{
+      height: 140, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 12, color: 'var(--text-quaternary)',
+    }}>
+      {t('overview.chart_empty')}
+    </div>
+  )
+}
+
+function KpiCard({ label, value, hint, accent }: {
+  label: string; value: string; hint: string; accent?: string
+}) {
+  return (
+    <div className="card-surface" style={{ padding: '14px 16px', minWidth: 0 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 560, letterSpacing: '-0.4px', color: accent ?? 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text-quaternary)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {hint}
+      </div>
     </div>
   )
 }
