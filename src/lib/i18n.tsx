@@ -34,13 +34,18 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.title': '构建记录',
     'dashboard.projects': '个项目已监控',
     'dashboard.no_projects': '未选择项目',
-    'dashboard.no_projects.hint': '从左侧选择项目开始监控',
+    'dashboard.no_projects.hint': '从上方选择项目开始监控',
     'dashboard.select_project': '选择项目查看构建记录',
     'dashboard.projects_label': '项目',
+    'dashboard.search_projects': '搜索项目...',
+    'dashboard.status_all': '全部',
+
     'dashboard.search_builds': '搜索构建...',
     'dashboard.tab.builds_all': '全部构建',
     'dashboard.tab.builds_favorites': '收藏',
-    'dashboard.favorite_in_builds_hint': '选择左侧项目后，在构建卡片上点击星标收藏子项目',
+    'dashboard.view_grid': '网格视图',
+    'dashboard.view_compact': '紧凑视图',
+    'dashboard.favorite_in_builds_hint': '从上方选择项目后，在构建卡片上点击星标收藏子项目',
     'dashboard.favorite': '收藏子项目',
     'dashboard.unfavorite': '取消收藏',
     'dashboard.favorites_polling': '个子项目已收藏并轮询',
@@ -52,6 +57,10 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.git_auto_deployed': '已自动部署',
     'common.load_more': '加载更多',
     'common.loading_more': '加载中…',
+    'common.copy': '复制',
+    'common.copied': '已复制',
+    'common.download': '下载',
+
 
     // Build detail
     'build.deploying': '部署进行中…',
@@ -200,6 +209,11 @@ const translations: Record<Locale, Record<string, string>> = {
     'deploy.started': '开始时间',
     'deploy.finished': '完成时间',
     'deploy.reason': '原因',
+    'deploy.trigger_manual': '手动触发',
+    'deploy.trigger_manual_by': '手动 · {user}',
+    'deploy.trigger_code_by': '代码提交 · {user}',
+    'deploy.trigger_scheduled': '定时触发',
+
 
     // Deployments History (子项目详情 - 部署历史模块)
     'deploy.loading': '加载部署历史…',
@@ -230,6 +244,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'settings.auto_deploy_git': 'Git 有新提交时自动部署收藏计划',
     'settings.auto_deploy_git.hint': '轮询时对比远程仓库与最近构建的提交；若有新提交且当前无进行中构建，则自动触发 Bamboo 构建（需本机已安装 git）',
     'settings.auto_deploy_git.warning': '开启后将在检测到新提交时自动触发构建，请确认生产环境风险',
+    'settings.menu_bar_quick_actions': '菜单栏快捷部署',
+    'settings.menu_bar_quick_actions.hint': '开启后在 macOS 菜单栏图标中可对收藏子项目执行部署、中断、重试；操作结果通过系统通知反馈',
     'settings.allow_insecure_http': '允许 HTTP 连接 Bamboo',
     'settings.allow_insecure_http.hint': '默认仅允许 HTTPS；内网 HTTP Bamboo 需勾选此项',
     'settings.git_repo_mappings': 'Git 仓库地址映射',
@@ -258,11 +274,16 @@ const translations: Record<Locale, Record<string, string>> = {
     'logs.search': '搜索日志...',
     'logs.all_levels': '所有级别',
     'logs.all_categories': '所有分类',
+    'logs.filter_all': '全部',
+    'logs.filter_errors': '错误 ({count})',
+    'logs.filter_warnings': '警告 ({count})',
+    'logs.toggle_line_numbers': '切换行号',
     'logs.auto_refresh': '自动刷新',
     'logs.refresh': '刷新',
     'logs.export': '导出',
     'logs.clear': '清空',
     'logs.no_logs': '暂无日志',
+
 
     // Health
     'health.title': '系统健康',
@@ -355,13 +376,17 @@ const translations: Record<Locale, Record<string, string>> = {
     'dashboard.title': 'Build Results',
     'dashboard.projects': 'projects monitored',
     'dashboard.no_projects': 'No projects selected',
-    'dashboard.no_projects.hint': 'Select projects from the left to start monitoring',
+    'dashboard.no_projects.hint': 'Select a project from the selector above to start monitoring',
     'dashboard.select_project': 'Select a project to view builds',
     'dashboard.projects_label': 'Projects',
+    'dashboard.search_projects': 'Search projects...',
+    'dashboard.status_all': 'All',
+
     'dashboard.search_builds': 'Search builds...',
     'dashboard.tab.builds_all': 'All Builds',
+
     'dashboard.tab.builds_favorites': 'Favorites',
-    'dashboard.favorite_in_builds_hint': 'Select a project on the left, then star a build card to favorite its plan',
+    'dashboard.favorite_in_builds_hint': 'Select a project above, then star a build card to favorite its plan',
     'dashboard.favorite': 'Favorite plan',
     'dashboard.unfavorite': 'Remove favorite',
     'dashboard.favorites_polling': 'favorite plans polling',
@@ -520,6 +545,11 @@ const translations: Record<Locale, Record<string, string>> = {
     'deploy.started': 'Started',
     'deploy.finished': 'Finished',
     'deploy.reason': 'Reason',
+    'deploy.trigger_manual': 'Manual Run',
+    'deploy.trigger_manual_by': 'Manual · {user}',
+    'deploy.trigger_code_by': 'Commit · {user}',
+    'deploy.trigger_scheduled': 'Scheduled',
+
 
     // Deployments History
     'deploy.loading': 'Loading deployment history…',
@@ -550,6 +580,8 @@ const translations: Record<Locale, Record<string, string>> = {
     'settings.auto_deploy_git': 'Auto-deploy favorites when Git has new commits',
     'settings.auto_deploy_git.hint': 'Each poll compares remote HEAD with the last build revision; queues a build when ahead (requires git on PATH)',
     'settings.auto_deploy_git.warning': 'When enabled, new commits automatically queue builds — confirm production risk',
+    'settings.menu_bar_quick_actions': 'Menu bar quick deploy',
+    'settings.menu_bar_quick_actions.hint': 'When enabled, the macOS menu bar icon can deploy, stop, or retry favorite plans; results show as system notifications',
     'settings.allow_insecure_http': 'Allow HTTP connections to Bamboo',
     'settings.allow_insecure_http.hint': 'HTTPS is required by default; enable for on-prem HTTP Bamboo servers',
     'settings.git_repo_mappings': 'Git repository URL mappings',
@@ -578,6 +610,10 @@ const translations: Record<Locale, Record<string, string>> = {
     'logs.search': 'Search logs...',
     'logs.all_levels': 'All Levels',
     'logs.all_categories': 'All Categories',
+    'logs.filter_all': 'All',
+    'logs.filter_errors': 'Errors ({count})',
+    'logs.filter_warnings': 'Warnings ({count})',
+    'logs.toggle_line_numbers': 'Toggle line numbers',
     'logs.auto_refresh': 'Auto-refresh',
     'logs.refresh': 'Refresh',
     'logs.export': 'Export',

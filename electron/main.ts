@@ -3,7 +3,7 @@ import path from 'path'
 import Store from 'electron-store'
 import { BambooClient, BambooDeployResult, setGitRepositoryUrlMappings } from './bamboo-client'
 import { startPolling, stopPolling, type FavoritePlan, type PollingOptions } from './poller'
-import { setupTray } from './tray'
+import { setupTray, updateTrayMenu } from './tray'
 import { getAppIcon, setDockIcon } from './app-icon'
 import { logger } from './lib/logger'
 import { clearStoredPassword, readStoredPassword, writeStoredPassword } from './lib/credentials'
@@ -23,6 +23,7 @@ const store = new Store<{
   autoDeployOnGitChange: boolean
   gitRepositoryUrls: Record<string, string>
   allowInsecureHttp: boolean
+  menuBarQuickActions: boolean
   passwordEncrypted?: string
 }>()
 
@@ -118,14 +119,12 @@ if (!gotTheLock) {
       logger.error('SYSTEM', `Window load failed: ${code} ${desc}`)
     })
 
-    if (!isDev) {
-      mainWindow.on('close', (e) => {
-        if (tray) {
-          e.preventDefault()
-          mainWindow?.hide()
-        }
-      })
-    }
+    mainWindow.on('close', (e) => {
+      if (tray) {
+        e.preventDefault()
+        mainWindow?.hide()
+      }
+    })
   }
 
   function destroyTray() {
@@ -136,7 +135,98 @@ if (!gotTheLock) {
     }
   }
 
-  function sendNotification(title: string, body: string, deploy: BambooDeployResult) {
+  function notifySimple(title: string, body: string) {
+    if (!Notification.isSupported()) return
+    new Notification({ title, body, silent: false }).show()
+  }
+
+  function isActiveBuildLife(lifeCycleState?: string, buildState?: string): boolean {
+    const life = (lifeCycleState ?? '').toUpperCase().replace(/[\s_-]+/g, '')
+    const state = (buildState ?? '').toUpperCase().replace(/[\s_-]+/g, '')
+    if (life === 'QUEUED' || life === 'INPROGRESS' || life === 'PENDING') return true
+    return state === 'INPROGRESS' || state === 'RUNNING'
+  }
+
+  async function trayDeploy(planKey: string) {
+    const client = ensureBambooClient()
+    if (!client) {
+      notifySimple('快捷部署失败', '未登录 Bamboo')
+      return
+    }
+    const result = await client.queueBuild(planKey)
+    if (result.success) {
+      notifySimple('已触发部署', `${planKey}${result.buildResultKey ? ` · ${result.buildResultKey}` : ''}`)
+    } else {
+      notifySimple('快捷部署失败', result.errorMessage || planKey)
+    }
+  }
+
+  async function trayStop(planKey: string) {
+    const client = ensureBambooClient()
+    if (!client) {
+      notifySimple('中断失败', '未登录 Bamboo')
+      return
+    }
+    try {
+      const results = await client.getPlanResults(planKey)
+      const active = results.find((r) => isActiveBuildLife(r.lifeCycleState, r.buildState))
+      if (!active?.buildResultKey) {
+        notifySimple('中断失败', `${planKey} 当前没有进行中的构建`)
+        return
+      }
+      const result = await client.stopBuild(active.buildResultKey)
+      if (result.success) {
+        notifySimple('已中断构建', active.buildResultKey)
+      } else {
+        notifySimple('中断失败', result.errorMessage || active.buildResultKey)
+      }
+    } catch (err: unknown) {
+      notifySimple('中断失败', err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function trayRetry(planKey: string) {
+    const client = ensureBambooClient()
+    if (!client) {
+      notifySimple('重试失败', '未登录 Bamboo')
+      return
+    }
+    const result = await client.queueBuild(planKey)
+    if (result.success) {
+      notifySimple('已重试部署', `${planKey}${result.buildResultKey ? ` · ${result.buildResultKey}` : ''}`)
+    } else {
+      notifySimple('重试失败', result.errorMessage || planKey)
+    }
+  }
+
+  function syncTray() {
+    if (!mainWindow) return
+    const quickEnabled = !!store.get('menuBarQuickActions', false)
+    // macOS 始终显示菜单栏图标；其它平台仅在快捷操作开启或生产包时显示
+    const shouldHaveTray = process.platform === 'darwin' || quickEnabled || !isDev
+    if (!shouldHaveTray) {
+      destroyTray()
+      logger.info('SYSTEM', 'Tray skipped', { platform: process.platform, quickEnabled, isDev })
+      return
+    }
+    if (!tray) {
+      tray = setupTray(mainWindow, startMonitoring)
+      logger.info('SYSTEM', 'Tray created', { quickEnabled, isDev })
+    }
+    const favorites = (store.get('favoritePlans', []) as FavoritePlan[]).map((f) => ({
+      planKey: f.planKey,
+      planName: f.planName || f.planKey,
+    }))
+    updateTrayMenu(tray, mainWindow, startMonitoring, {
+      enabled: quickEnabled,
+      favorites,
+      onDeploy: (planKey) => { void trayDeploy(planKey) },
+      onStop: (planKey) => { void trayStop(planKey) },
+      onRetry: (planKey) => { void trayRetry(planKey) },
+    })
+  }
+
+  function sendNotification(title: string, body: string, deploy?: BambooDeployResult) {
     if (!Notification.isSupported()) {
       logger.warn('NOTIFY', 'Notifications not supported')
       return
@@ -146,7 +236,7 @@ if (!gotTheLock) {
 
     notification.on('click', () => {
       mainWindow?.show()
-      mainWindow?.webContents.send('navigate-to-deploy', deploy)
+      if (deploy) mainWindow?.webContents.send('navigate-to-deploy', deploy)
     })
 
     notification.show()
@@ -565,6 +655,9 @@ if (!gotTheLock) {
       if (key === 'gitRepositoryUrls' && value && typeof value === 'object') {
         setGitRepositoryUrlMappings(value as Record<string, string>)
       }
+      if (key === 'menuBarQuickActions' || key === 'favoritePlans') {
+        syncTray()
+      }
     })
 
     ipcMain.handle('poll:start', async (_e, interval: number, favoritePlans: FavoritePlan[]) => {
@@ -572,6 +665,7 @@ if (!gotTheLock) {
       if (!bamboo) return
       store.set('pollInterval', interval)
       store.set('favoritePlans', favoritePlans)
+      syncTray()
       startPolling(bamboo, favoritePlans, interval, async (newDeploys) => {
         await notifyNewDeploys(bamboo!, newDeploys)
         mainWindow?.webContents.send('new-deploys', newDeploys)
@@ -726,11 +820,7 @@ if (!gotTheLock) {
       setGitRepositoryUrlMappings(gitUrls)
     }
     createWindow()
-
-    if (mainWindow && !isDev) {
-      tray = setupTray(mainWindow, startMonitoring)
-    }
-
+    syncTray()
     startMonitoring()
     registerIPC()
 

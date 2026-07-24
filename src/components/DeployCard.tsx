@@ -37,16 +37,31 @@ export default function DeployCard({
   const triggerBy = (result?.initiator?.name ?? result?.reason ?? '').trim()
   const timeMs = result?.startedDate ?? result?.finishedDate
   const timeLabel = timeMs ? new Date(timeMs).toLocaleString() : ''
-  const planName = deploy.plan?.name ?? deploy.environment.name
+  const rawPlanName = deploy.plan?.name ?? deploy.environment.name ?? ''
+  const projName = deploy.project.name || ''
+  const projKey = deploy.project.key || ''
+
+  let planName = rawPlanName
+  if (projName && planName.startsWith(`${projName} - `)) {
+    planName = planName.slice(projName.length + 3)
+  } else if (projKey && planName.startsWith(`${projKey} - `)) {
+    planName = planName.slice(projKey.length + 3)
+  }
+
   const planKey = deploy.plan?.key ?? deploy.environment.key
   const canFavorite = !!planKey && !!onToggleFavorite
+
+  let triggerText = triggerBy
+  if (triggerText.startsWith('Manual run by ')) {
+    triggerText = triggerText.slice('Manual run by '.length)
+  }
 
   return (
     <div
       className="geist-card"
       style={{
         cursor: buildKey ? 'pointer' : 'default',
-        padding: '14px 16px',
+        padding: '12px 16px',
       }}
       onClick={() => buildKey && onOpenBuild?.(buildKey)}
     >
@@ -68,10 +83,10 @@ export default function DeployCard({
             </button>
           )}
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <span className="truncate" style={{
                 fontSize: 14, fontWeight: 550, color: 'var(--text-primary)', flex: '1 1 auto',
-              }} title={planName}>
+              }} title={rawPlanName}>
                 {planName}
               </span>
               <span className="truncate" style={{
@@ -89,17 +104,14 @@ export default function DeployCard({
                 </span>
               )}
             </div>
-            <div className="truncate" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-              {deploy.project.name || deploy.project.key}
-            </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '0 1 auto', minWidth: 0, maxWidth: '45%' }}>
           <div style={{ fontSize: 12, color: 'var(--text-quaternary)', textAlign: 'right', minWidth: 0, overflow: 'hidden' }}>
-            {triggerBy && (
+            {triggerText && (
               <div className="truncate" style={{ color: 'var(--text-secondary)' }} title={triggerBy}>
-                {triggerBy}
+                {triggerText}
               </div>
             )}
             {timeLabel && <div className="truncate" style={{ fontSize: 11 }} title={timeLabel}>{timeLabel}</div>}
@@ -116,5 +128,6 @@ export default function DeployCard({
       </div>
     </div>
   )
-
 }
+
+

@@ -35,13 +35,7 @@ const CHART_COLORS = {
   amber: '#fbbf24',
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  Successful: CHART_COLORS.success,
-  Failed: CHART_COLORS.failed,
-  Unknown: CHART_COLORS.muted,
-  'In Progress': CHART_COLORS.blue,
-  Stopped: CHART_COLORS.muted,
-}
+
 
 const tooltipStyle = {
   background: 'var(--bg-elevated)',
@@ -78,13 +72,14 @@ function formatDurationSeconds(seconds: number): string {
   return `${seconds}s`
 }
 
-function statusLabel(kind: string): string {
-  if (kind === 'Successful' || kind === 'SUCCESS' || kind === 'SUCCESSFUL') return 'Successful'
-  if (kind === 'Failed' || kind === 'FAILED' || kind === 'FAILURE') return 'Failed'
-  if (kind === 'InProgress' || kind === 'Queued') return 'In Progress'
-  if (kind === 'Cancelled') return 'Stopped'
-  return 'Unknown'
+function statusLabel(kind: string, t: (key: string) => string): string {
+  if (kind === 'Successful' || kind === 'SUCCESS' || kind === 'SUCCESSFUL') return t('status.success')
+  if (kind === 'Failed' || kind === 'FAILED' || kind === 'FAILURE') return t('status.failed')
+  if (kind === 'InProgress' || kind === 'Queued') return t('status.in_progress')
+  if (kind === 'Cancelled' || kind === 'Stopped') return t('status.cancelled')
+  return t('status.unknown')
 }
+
 
 function useScrollReveal() {
   const ref = useRef<HTMLDivElement>(null)
@@ -187,11 +182,12 @@ export default function Overview() {
   const statusData = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const s of snapshots) {
-      const label = statusLabel(statusBadgeKey(s))
+      const label = statusLabel(statusBadgeKey(s), t)
       counts[label] = (counts[label] || 0) + 1
     }
     return Object.entries(counts).map(([name, value]) => ({ name, value }))
-  }, [snapshots])
+  }, [snapshots, t])
+
 
   const healthKpis = useMemo(() => {
     const finished = timeline.filter((e) => {
@@ -385,23 +381,34 @@ export default function Overview() {
                             innerRadius={38} outerRadius={60}
                             paddingAngle={4} strokeWidth={0}
                           >
-                            {statusData.map((entry) => (
-                              <Cell key={entry.name} fill={STATUS_COLORS[entry.name] ?? CHART_COLORS.muted} />
-                            ))}
+                            {statusData.map((entry) => {
+                              const fill = (entry.name === t('status.success') || entry.name === 'Successful') ? CHART_COLORS.success
+                                : (entry.name === t('status.failed') || entry.name === 'Failed') ? CHART_COLORS.failed
+                                : (entry.name === t('status.in_progress') || entry.name === 'In Progress') ? CHART_COLORS.blue
+                                : CHART_COLORS.muted
+                              return <Cell key={entry.name} fill={fill} />
+                            })}
                           </Pie>
                           <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [`${v}`, name]} />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 0 }}>
-                      {statusData.map((entry) => (
-                        <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[entry.name] ?? CHART_COLORS.muted, flexShrink: 0 }} />
-                          <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</span>
-                          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{entry.value}</span>
-                        </div>
-                      ))}
+                      {statusData.map((entry) => {
+                        const bg = (entry.name === t('status.success') || entry.name === 'Successful') ? CHART_COLORS.success
+                          : (entry.name === t('status.failed') || entry.name === 'Failed') ? CHART_COLORS.failed
+                          : (entry.name === t('status.in_progress') || entry.name === 'In Progress') ? CHART_COLORS.blue
+                          : CHART_COLORS.muted
+                        return (
+                          <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: bg, flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</span>
+                            <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{entry.value}</span>
+                          </div>
+                        )
+                      })}
                     </div>
+
                   </div>
                 )}
               </div>

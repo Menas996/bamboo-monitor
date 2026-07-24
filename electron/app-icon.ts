@@ -32,9 +32,32 @@ export function getTrayIconPath(): string {
 }
 
 export function getTrayIcon(): NativeImage {
-  const img = nativeImage.createFromPath(getTrayIconPath())
-  const source = img.isEmpty() ? getAppIcon() : img
-  return source.isEmpty() ? source : source.resize({ width: 18, height: 18 })
+  const trayPath = getTrayIconPath()
+  let img = nativeImage.createFromPath(trayPath)
+  if (img.isEmpty()) {
+    loggerFallback(`tray icon missing or empty: ${trayPath}`)
+    img = getAppIcon()
+  }
+  if (img.isEmpty()) {
+    // 1x1 透明图会导致 macOS 菜单栏“看不见”，用简易占位图兜底
+    img = nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAANElEQVRYR+3XMQoAIAwDwB7+/+eqg4uDoIVayF0IBJK0TQAAAAAAAAAAAAAAAAAAADwZ7gMAf1kQbQAAAABJRU5ErkJggg==',
+    )
+  }
+  const sized = img.resize({ width: 18, height: 18 })
+  if (process.platform === 'darwin') {
+    sized.setTemplateImage(true)
+  }
+  return sized
+}
+
+function loggerFallback(message: string): void {
+  try {
+    // 避免 app-icon ↔ logger 循环依赖：直接打 stderr
+    process.stderr.write(`[TRAY] ${message}\n`)
+  } catch {
+    /* ignore */
+  }
 }
 
 export function setDockIcon(): void {

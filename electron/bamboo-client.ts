@@ -1517,6 +1517,7 @@ export class BambooClient {
         headers: {
           ...(this.authMethod === 'session' ? { Cookie: cookieHeader } : { Authorization: this.auth }),
           Accept: 'application/json',
+          'X-Atlassian-Token': 'no-check',
         },
       })
 

@@ -89,6 +89,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   const { theme, setTheme } = useTheme()
   const [pollInterval, setPollInterval] = useState(30)
   const [autoDeployOnGitChange, setAutoDeployOnGitChange] = useState(false)
+  const [menuBarQuickActions, setMenuBarQuickActions] = useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = useState(false)
   const [gitRepoMappingsText, setGitRepoMappingsText] = useState('')
   const [saved, setSaved] = useState(false)
@@ -109,6 +110,9 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
     window.config.get('pollInterval').then((v) => { if (v) setPollInterval(v) })
     window.config.get('autoDeployOnGitChange').then((value) => {
       if (typeof value === 'boolean') setAutoDeployOnGitChange(value)
+    })
+    window.config.get('menuBarQuickActions').then((value) => {
+      if (typeof value === 'boolean') setMenuBarQuickActions(value)
     })
     window.config.get('allowInsecureHttp').then((value) => {
       if (typeof value === 'boolean') setAllowInsecureHttp(value)
@@ -176,6 +180,7 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
   async function handleSave() {
     await window.config.set('pollInterval', pollInterval)
     await window.config.set('autoDeployOnGitChange', autoDeployOnGitChange)
+    await window.config.set('menuBarQuickActions', menuBarQuickActions)
     await window.config.set('allowInsecureHttp', allowInsecureHttp)
     await window.config.set('gitRepositoryUrls', parseGitRepoMappings(gitRepoMappingsText))
     const favorites = await window.config.get('favoritePlans') as { planKey: string; projectKey: string; planName: string }[] | undefined
@@ -353,6 +358,24 @@ export default function Settings({ onLogout }: { onLogout: () => void }) {
                 </div>
                 <div style={{ ...styles.hint, marginLeft: 26, color: 'var(--warning, #f59e0b)' }}>
                   {t('settings.auto_deploy_git.warning')}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 24 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={menuBarQuickActions}
+                    onChange={(e) => setMenuBarQuickActions(e.target.checked)}
+                    style={{ accentColor: 'var(--accent)', width: 16, height: 16 }}
+                  />
+                  {t('settings.menu_bar_quick_actions')}
+                </label>
+                <div style={{ ...styles.hint, marginLeft: 26 }}>
+                  {t('settings.menu_bar_quick_actions.hint')}
                 </div>
               </div>
 

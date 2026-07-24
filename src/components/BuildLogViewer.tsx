@@ -197,22 +197,22 @@ export default function BuildLogViewer({
           <button
             type="button"
             onClick={handleCopy}
-            title="Copy log to clipboard"
+            title={t('common.copy')}
             className="btn-ghost"
             style={{ fontSize: 12, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
           >
             <Copy size={12} />
-            {copied ? 'Copied!' : 'Copy'}
+            {copied ? t('common.copied') : t('common.copy')}
           </button>
           <button
             type="button"
             onClick={handleDownload}
-            title="Download full log"
+            title={t('common.download')}
             className="btn-ghost"
             style={{ fontSize: 12, padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
           >
             <Download size={12} />
-            Download
+            {t('common.download')}
           </button>
           <button
             type="button"
@@ -286,21 +286,21 @@ export default function BuildLogViewer({
                 onClick={() => setLogFilter('all')}
                 style={{ padding: '3px 8px', fontSize: 11 }}
               >
-                All
+                {t('logs.filter_all')}
               </button>
               <button
                 className={`filter-pill ${logFilter === 'error' ? 'active' : ''}`}
                 onClick={() => setLogFilter('error')}
                 style={{ padding: '3px 8px', fontSize: 11, color: logFilter === 'error' ? 'var(--error)' : undefined }}
               >
-                Errors ({errorCount})
+                {t('logs.filter_errors').replace('{count}', String(errorCount))}
               </button>
               <button
                 className={`filter-pill ${logFilter === 'warning' ? 'active' : ''}`}
                 onClick={() => setLogFilter('warning')}
                 style={{ padding: '3px 8px', fontSize: 11, color: logFilter === 'warning' ? 'var(--warning)' : undefined }}
               >
-                Warnings ({warningCount})
+                {t('logs.filter_warnings').replace('{count}', String(warningCount))}
               </button>
             </div>
 
@@ -309,7 +309,7 @@ export default function BuildLogViewer({
                 <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
                 <input
                   className="input-linear"
-                  placeholder="Search logs..."
+                  placeholder={t('logs.search')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{ fontSize: 11, padding: '3px 8px 3px 26px', width: 140 }}
@@ -318,12 +318,13 @@ export default function BuildLogViewer({
 
               <button
                 onClick={() => setShowLineNumbers(!showLineNumbers)}
-                title="Toggle line numbers"
+                title={t('logs.toggle_line_numbers')}
                 className={`view-toggle-btn ${showLineNumbers ? 'active' : ''}`}
                 style={{ width: 26, height: 26 }}
               >
                 <Hash size={13} />
               </button>
+
 
               {fetchedAt && (
                 <span className="truncate" style={{ fontSize: 11, color: 'var(--text-quaternary)' }}>

@@ -4,7 +4,7 @@ import { useNavigate, useRoute } from './routes'
 
 import DeployCard from '../components/DeployCard'
 import DeployListRow from '../components/DeployListRow'
-import ProjectTree from '../components/ProjectTree'
+import ProjectSelect from '../components/ProjectSelect'
 import FavoritePlanList, { type FavoritePlan, type PlanLiveStatus } from '../components/FavoritePlanList'
 import LoadingSpinner from '../components/LoadingSpinner'
 import {
@@ -89,8 +89,6 @@ export default function Dashboard() {
   const [deploys, setDeploys] = useState<DeployData[]>([])
   const [loading, setLoading] = useState(true)
   const [deployLoading, setDeployLoading] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [projectPage, setProjectPage] = useState(0)
   const [deployPage, setDeployPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [buildSearch, setBuildSearch] = useState('')
@@ -107,6 +105,9 @@ export default function Dashboard() {
     async function load() {
       const projs = await window.bamboo.getProjects()
       setProjects(projs)
+      if (projs.length > 0) {
+        setSelectedProject((prev) => prev ?? projs[0].key)
+      }
       const savedFav = await window.config.get('favoritePlans') as FavoritePlan[] | undefined
       const favs = savedFav ?? []
       setFavorites(favs)
@@ -310,26 +311,6 @@ export default function Dashboard() {
 
   const favoriteKeys = useMemo(() => new Set(favorites.map((f) => f.planKey)), [favorites])
 
-  const filteredProjects = useMemo(() => {
-    if (!searchQuery) return projects
-    const q = searchQuery.toLowerCase()
-    return projects.filter((p) =>
-      p.name.toLowerCase().includes(q) || p.key.toLowerCase().includes(q)
-    )
-  }, [projects, searchQuery])
-
-  useEffect(() => {
-    if (!searchQuery || !selectedProject) return
-    const isSelectedInFiltered = filteredProjects.some((p) => p.key === selectedProject)
-    if (!isSelectedInFiltered) {
-      setSelectedProject(filteredProjects[0]?.key ?? null)
-    }
-  }, [searchQuery, filteredProjects, selectedProject])
-
-
-  const totalPages = Math.ceil(filteredProjects.length / PAGE_SIZE)
-  const paginatedProjects = filteredProjects.slice(projectPage * PAGE_SIZE, (projectPage + 1) * PAGE_SIZE)
-
   const filteredDeploys = useMemo(() => {
     let result = deploys
     if (statusFilter) {
@@ -379,82 +360,46 @@ export default function Dashboard() {
   }
 
   return (
-    <div style={{ display: 'flex', gap: 24, height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Top Fixed Header & Control Bar */}
       <div style={{
-        width: 260, flexShrink: 0, overflow: 'auto',
-        borderRight: '1px solid var(--border-subtle)',
-        padding: '4px 16px 8px 4px',
-        minWidth: 0,
+        flexShrink: 0,
+        padding: '8px 12px 12px 4px',
+        background: 'var(--bg-page)',
+        borderBottom: '1px solid var(--border-subtle)',
+        zIndex: 20,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
       }}>
-        <div style={{ position: 'relative', marginBottom: 12 }}>
-          <Search size={14} style={{
-            position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-            color: 'var(--text-quaternary)', pointerEvents: 'none',
-          }} />
-          <input
-            className="input-linear"
-            placeholder={t('logs.search')}
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setProjectPage(0) }}
-            style={{ paddingLeft: 32, fontSize: 13, padding: '7px 12px 7px 32px' }}
-          />
-        </div>
-
-        <ProjectTree
-          projects={paginatedProjects}
-          activeProject={selectedProject}
-          onSelect={setSelectedProject}
-        />
-
-        {totalPages > 1 && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: 8, marginTop: 12, fontSize: 12, color: 'var(--text-quaternary)',
-          }}>
-            <button
-              onClick={() => setProjectPage((p) => Math.max(0, p - 1))}
-              disabled={projectPage === 0}
-              style={{
-                background: 'none', border: 'none', cursor: projectPage === 0 ? 'default' : 'pointer',
-                color: projectPage === 0 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
-                padding: 4, display: 'flex',
-              }}
-            >
-              <ChevronLeft size={14} />
-            </button>
-            <span style={{ whiteSpace: 'nowrap' }}>{projectPage + 1} / {totalPages}</span>
-            <button
-              onClick={() => setProjectPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={projectPage >= totalPages - 1}
-              style={{
-                background: 'none', border: 'none',
-                cursor: projectPage >= totalPages - 1 ? 'default' : 'pointer',
-                color: projectPage >= totalPages - 1 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
-                padding: 4, display: 'flex',
-              }}
-            >
-              <ChevronRight size={14} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div style={{ flex: 1, overflow: 'auto', minWidth: 0, padding: '4px' }}>
+        {/* Row 1: Title, ProjectSelect, View Mode Toggle, Build Tabs */}
         <div style={{
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-          marginBottom: 16, gap: 16, flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 16, flexWrap: 'wrap',
         }}>
-          <div style={{ minWidth: 0 }}>
-            <h1 style={{
-              fontSize: 20, fontWeight: 510, color: 'var(--text-primary)',
-              letterSpacing: '-0.24px',
-            }}>
-              {t('dashboard.title')}
-            </h1>
-            <p className="truncate" style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
-              {favorites.length} {t('dashboard.favorites_polling')}
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0 }}>
+              <h1 style={{
+                fontSize: 20, fontWeight: 510, color: 'var(--text-primary)',
+                letterSpacing: '-0.24px',
+              }}>
+                {t('dashboard.title')}
+              </h1>
+              <p className="truncate" style={{ fontSize: 13, color: 'var(--text-tertiary)', marginTop: 4 }}>
+                {favorites.length} {t('dashboard.favorites_polling')}
+              </p>
+            </div>
+
+            {buildTab === 'all' && (
+              <ProjectSelect
+                projects={projects}
+                selectedProject={selectedProject}
+                onSelect={setSelectedProject}
+                showLabel
+              />
+            )}
           </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
             <div style={{
               display: 'flex', background: 'var(--bg-surface)', padding: 2,
@@ -463,14 +408,14 @@ export default function Dashboard() {
               <button
                 className={`view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}`}
                 onClick={() => setViewMode('grid')}
-                title="Grid view"
+                title={t('dashboard.view_grid')}
               >
                 <LayoutGrid size={15} />
               </button>
               <button
                 className={`view-toggle-btn ${viewMode === 'compact' ? 'active' : ''}`}
                 onClick={() => setViewMode('compact')}
-                title="Compact view"
+                title={t('dashboard.view_compact')}
               >
                 <List size={15} />
               </button>
@@ -493,174 +438,185 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Row 2: Sub-search bar & Status Pills Filter (Fixed top bar in 'all' tab) */}
+        {buildTab === 'all' && deploys.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={14} style={{
+                position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+                color: 'var(--text-quaternary)',
+              }} />
+              <input
+                className="input-linear"
+                placeholder={t('dashboard.search_builds')}
+                value={buildSearch}
+                onChange={(e) => { setBuildSearch(e.target.value); setDeployPage(0) }}
+                style={{ paddingLeft: 32, fontSize: 13, padding: '7px 12px 7px 32px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <StatusPill
+                label={`${t('dashboard.status_all')} (${statusCounts.all})`}
+                active={!statusFilter}
+                onClick={() => { setStatusFilter(''); setDeployPage(0) }}
+              />
+              {Object.entries(statusCounts).filter(([k]) => k !== 'all').map(([status, count]) => {
+                const norm = status.toUpperCase().replace(/[\s_-]+/g, '')
+                let translatedStatus = status
+                if (norm === 'SUCCESSFUL' || norm === 'SUCCESS') translatedStatus = t('status.success')
+                else if (norm === 'FAILED' || norm === 'FAILURE') translatedStatus = t('status.failed')
+                else if (norm === 'CANCELLED' || norm === 'CANCELED' || norm === 'STOPPED') translatedStatus = t('status.cancelled')
+                else if (norm === 'INPROGRESS' || norm === 'RUNNING') translatedStatus = t('status.in_progress')
+                else if (norm === 'QUEUED' || norm === 'PENDING') translatedStatus = t('status.queued')
+
+                return (
+                  <StatusPill
+                    key={status}
+                    label={`${translatedStatus} (${count})`}
+                    active={statusFilter === status}
+                    onClick={() => { setStatusFilter(status === statusFilter ? '' : status); setDeployPage(0) }}
+                    status={status}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Middle Scrollable Build List Area */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 12px 12px 4px', minWidth: 0 }}>
         {buildTab === 'favorites' ? (
           <FavoritePlanList
             favorites={favorites}
             planStatus={planStatus}
             gitDeployFlash={gitDeployFlash}
+            viewMode={viewMode}
             onToggleFavorite={toggleFavorite}
             onOpenFavorite={openFavoriteDetail}
             openingPlanKey={openingFavoriteKey}
           />
+        ) : deployLoading ? (
+          <LoadingSpinner text={t('app.loading')} />
+        ) : deployError ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--error)' }}>
+            <div style={{ fontSize: 14 }}>{t('dashboard.deploy_load_error')}</div>
+            <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text-quaternary)' }}>{deployError}</div>
+          </div>
+        ) : !selectedProject ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-quaternary)' }}>
+            <div style={{ fontSize: 14 }}>{t('dashboard.select_project')}</div>
+            <div style={{ fontSize: 13, marginTop: 8 }}>{t('dashboard.favorite_in_builds_hint')}</div>
+          </div>
+        ) : paginatedDeploys.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-quaternary)' }}>
+            <div style={{ fontSize: 14 }}>{t('logs.no_logs')}</div>
+          </div>
         ) : (
-          <>
-            {deploys.length > 0 && (
-              <div style={{ position: 'relative', marginBottom: 12 }}>
-                <Search size={14} style={{
-                  position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
-                  color: 'var(--text-quaternary)',
-                }} />
-                <input
-                  className="input-linear"
-                  placeholder={t('dashboard.search_builds')}
-                  value={buildSearch}
-                  onChange={(e) => { setBuildSearch(e.target.value); setDeployPage(0) }}
-                  style={{ paddingLeft: 32, fontSize: 13, padding: '7px 12px 7px 32px' }}
-                />
-              </div>
-            )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: viewMode === 'compact' ? 6 : 8 }}>
+            {paginatedDeploys.map((d, i) => {
+              const fav = selectedProject ? deployToFavorite(d, selectedProject) : null
+              const planKey = fav?.planKey ?? d.plan?.key ?? d.environment.key
+              const live = planKey ? planStatus[planKey] : undefined
+              const cardKey = `${planKey}-${live?.buildResultKey ?? d.buildResultKey ?? i}`
+              const isFav = planKey ? favoriteKeys.has(planKey) : false
+              const isRunning = !!live?.isRunning
+              const bNumber = live?.buildNumber ?? d.deployment?.id
 
-            {deploys.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-                <StatusPill
-                  label={`${t('logs.all_levels')} (${statusCounts.all})`}
-                  active={!statusFilter}
-                  onClick={() => { setStatusFilter(''); setDeployPage(0) }}
-                />
-                {Object.entries(statusCounts).filter(([k]) => k !== 'all').map(([status, count]) => (
-                  <StatusPill
-                    key={status}
-                    label={`${status} (${count})`}
-                    active={statusFilter === status}
-                    onClick={() => { setStatusFilter(status === statusFilter ? '' : status); setDeployPage(0) }}
-                    status={status}
+              if (viewMode === 'compact') {
+                return (
+                  <DeployListRow
+                    key={cardKey}
+                    deploy={d}
+                    isFavorite={isFav}
+                    isDeploying={isRunning}
+                    displayBuildNumber={bNumber}
+                    onToggleFavorite={fav ? () => toggleFavorite(fav) : undefined}
+                    onOpenBuild={(key) => {
+                      const openKey = isRunning && live?.buildResultKey ? live.buildResultKey : key
+                      navigate({ page: 'build', buildResultKey: openKey })
+                    }}
                   />
-                ))}
-              </div>
-            )}
+                )
+              }
 
-            {deployLoading ? (
-              <LoadingSpinner text={t('app.loading')} />
-            ) : deployError ? (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--error)' }}>
-                <div style={{ fontSize: 14 }}>{t('dashboard.deploy_load_error')}</div>
-                <div style={{ fontSize: 12, marginTop: 8, color: 'var(--text-quaternary)' }}>{deployError}</div>
-              </div>
-            ) : !selectedProject ? (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-quaternary)' }}>
-                <div style={{ fontSize: 14 }}>{t('dashboard.select_project')}</div>
-                <div style={{ fontSize: 13, marginTop: 8 }}>{t('dashboard.favorite_in_builds_hint')}</div>
-              </div>
-            ) : paginatedDeploys.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-quaternary)' }}>
-                <div style={{ fontSize: 14 }}>{t('logs.no_logs')}</div>
-              </div>
-            ) : (
-              <>
-                <p style={{ fontSize: 12, color: 'var(--text-quaternary)', marginBottom: 12 }}>
-                  {t('dashboard.deploy_latest_per_plan')}
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: viewMode === 'compact' ? 6 : 8 }}>
-                  {paginatedDeploys.map((d, i) => {
-                    const fav = selectedProject ? deployToFavorite(d, selectedProject) : null
-                    const planKey = fav?.planKey ?? d.plan?.key ?? d.environment.key
-                    const live = planKey ? planStatus[planKey] : undefined
-                    const cardKey = `${planKey}-${live?.buildResultKey ?? d.buildResultKey ?? i}`
-                    const isFav = planKey ? favoriteKeys.has(planKey) : false
-                    const isRunning = !!live?.isRunning
-                    const bNumber = live?.buildNumber ?? d.deployment?.id
-
-                    if (viewMode === 'compact') {
-                      return (
-                        <DeployListRow
-                          key={cardKey}
-                          deploy={d}
-                          isFavorite={isFav}
-                          isDeploying={isRunning}
-                          displayBuildNumber={bNumber}
-                          onToggleFavorite={fav ? () => toggleFavorite(fav) : undefined}
-                          onOpenBuild={(key) => {
-                            const openKey = isRunning && live?.buildResultKey ? live.buildResultKey : key
-                            navigate({ page: 'build', buildResultKey: openKey })
-                          }}
-                        />
-                      )
-                    }
-
-                    return (
-                      <DeployCard
-                        key={cardKey}
-                        deploy={d}
-                        isFavorite={isFav}
-                        isDeploying={isRunning}
-                        displayBuildNumber={bNumber}
-                        onToggleFavorite={fav ? () => toggleFavorite(fav) : undefined}
-                        onOpenBuild={(key) => {
-                          const openKey = isRunning && live?.buildResultKey ? live.buildResultKey : key
-                          navigate({ page: 'build', buildResultKey: openKey })
-                        }}
-                      />
-                    )
-                  })}
-                </div>
-
-
-                {(deployTotalPages > 1 || deployHasMore) && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    gap: 8, marginTop: 16, fontSize: 12, color: 'var(--text-quaternary)',
-                    flexWrap: 'wrap',
-                  }}>
-                    {deployTotalPages > 1 && (
-                      <>
-                        <button
-                          onClick={() => setDeployPage((p) => Math.max(0, p - 1))}
-                          disabled={deployPage === 0}
-                          style={{
-                            background: 'none', border: 'none', cursor: deployPage === 0 ? 'default' : 'pointer',
-                            color: deployPage === 0 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
-                            padding: 4, display: 'flex',
-                          }}
-                        >
-                          <ChevronLeft size={14} />
-                        </button>
-                        <span style={{ whiteSpace: 'nowrap' }}>{deployPage + 1} / {deployTotalPages}</span>
-                        <button
-                          onClick={() => setDeployPage((p) => Math.min(deployTotalPages - 1, p + 1))}
-                          disabled={deployPage >= deployTotalPages - 1}
-                          style={{
-                            background: 'none', border: 'none',
-                            cursor: deployPage >= deployTotalPages - 1 ? 'default' : 'pointer',
-                            color: deployPage >= deployTotalPages - 1 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
-                            padding: 4, display: 'flex',
-                          }}
-                        >
-                          <ChevronRight size={14} />
-                        </button>
-                      </>
-                    )}
-                    {deployHasMore && (
-                      <button
-                        type="button"
-                        onClick={() => void loadMoreDeploys()}
-                        disabled={deployLoadingMore}
-                        className="btn-ghost"
-                        style={{
-                          fontSize: 12, fontWeight: 510, padding: '6px 14px',
-                          opacity: deployLoadingMore ? 0.6 : 1,
-                          transition: 'opacity 0.15s ease',
-                        }}
-                      >
-                        {deployLoadingMore ? t('common.loading_more') : t('common.load_more')}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </>
+              return (
+                <DeployCard
+                  key={cardKey}
+                  deploy={d}
+                  isFavorite={isFav}
+                  isDeploying={isRunning}
+                  displayBuildNumber={bNumber}
+                  onToggleFavorite={fav ? () => toggleFavorite(fav) : undefined}
+                  onOpenBuild={(key) => {
+                    const openKey = isRunning && live?.buildResultKey ? live.buildResultKey : key
+                    navigate({ page: 'build', buildResultKey: openKey })
+                  }}
+                />
+              )
+            })}
+          </div>
         )}
       </div>
+
+      {/* Fixed Bottom Pagination & Load More Footer Bar */}
+      {buildTab === 'all' && (deployTotalPages > 1 || deployHasMore) && (
+        <div style={{
+          flexShrink: 0,
+          padding: '8px 12px',
+          background: 'var(--bg-page)',
+          borderTop: '1px solid var(--border-subtle)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 8, fontSize: 12, color: 'var(--text-quaternary)',
+          flexWrap: 'wrap',
+          zIndex: 10,
+        }}>
+          {deployTotalPages > 1 && (
+            <>
+              <button
+                onClick={() => setDeployPage((p) => Math.max(0, p - 1))}
+                disabled={deployPage === 0}
+                style={{
+                  background: 'none', border: 'none', cursor: deployPage === 0 ? 'default' : 'pointer',
+                  color: deployPage === 0 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
+                  padding: 4, display: 'flex',
+                }}
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span style={{ whiteSpace: 'nowrap' }}>{deployPage + 1} / {deployTotalPages}</span>
+              <button
+                onClick={() => setDeployPage((p) => Math.min(deployTotalPages - 1, p + 1))}
+                disabled={deployPage >= deployTotalPages - 1}
+                style={{
+                  background: 'none', border: 'none',
+                  cursor: deployPage >= deployTotalPages - 1 ? 'default' : 'pointer',
+                  color: deployPage >= deployTotalPages - 1 ? 'var(--text-quaternary)' : 'var(--text-secondary)',
+                  padding: 4, display: 'flex',
+                }}
+              >
+                <ChevronRight size={14} />
+              </button>
+            </>
+          )}
+          {deployHasMore && (
+            <button
+              type="button"
+              onClick={() => void loadMoreDeploys()}
+              disabled={deployLoadingMore}
+              className="btn-ghost"
+              style={{
+                fontSize: 12, fontWeight: 510, padding: '6px 14px',
+                opacity: deployLoadingMore ? 0.6 : 1,
+                transition: 'opacity 0.15s ease',
+              }}
+            >
+              {deployLoadingMore ? t('common.loading_more') : t('common.load_more')}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

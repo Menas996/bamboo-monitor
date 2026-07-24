@@ -37,9 +37,24 @@ export default function DeployListRow({
   const triggerBy = (result?.initiator?.name ?? result?.reason ?? '').trim()
   const timeMs = result?.startedDate ?? result?.finishedDate
   const timeLabel = timeMs ? new Date(timeMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
-  const planName = deploy.plan?.name ?? deploy.environment.name
+  const rawPlanName = deploy.plan?.name ?? deploy.environment.name ?? ''
+  const projName = deploy.project.name || ''
+  const projKey = deploy.project.key || ''
+
+  let planName = rawPlanName
+  if (projName && planName.startsWith(`${projName} - `)) {
+    planName = planName.slice(projName.length + 3)
+  } else if (projKey && planName.startsWith(`${projKey} - `)) {
+    planName = planName.slice(projKey.length + 3)
+  }
+
   const planKey = deploy.plan?.key ?? deploy.environment.key
   const canFavorite = !!planKey && !!onToggleFavorite
+
+  let triggerText = triggerBy
+  if (triggerText.startsWith('Manual run by ')) {
+    triggerText = triggerText.slice('Manual run by '.length)
+  }
 
   return (
     <div
@@ -71,7 +86,7 @@ export default function DeployListRow({
             <Star size={14} fill={isFavorite ? 'currentColor' : 'none'} />
           </button>
         )}
-        <span className="truncate" style={{ fontSize: 13, fontWeight: 550, color: 'var(--text-primary)', flex: '0 1 200px' }} title={planName}>
+        <span className="truncate" style={{ fontSize: 13, fontWeight: 550, color: 'var(--text-primary)', flex: '0 1 220px' }} title={rawPlanName}>
           {planName}
         </span>
         <span className="truncate" style={{
@@ -89,9 +104,9 @@ export default function DeployListRow({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
-        {triggerBy && (
+        {triggerText && (
           <span className="truncate" style={{ fontSize: 12, color: 'var(--text-tertiary)', maxWidth: 140 }} title={triggerBy}>
-            {triggerBy}
+            {triggerText}
           </span>
         )}
         {timeLabel && (
@@ -111,3 +126,4 @@ export default function DeployListRow({
     </div>
   )
 }
+

@@ -15,6 +15,7 @@ export const CONFIG_ALLOWLIST = new Set([
   'autoDeployOnGitChange',
   'gitRepositoryUrls',
   'allowInsecureHttp',
+  'menuBarQuickActions',
 ])
 
 const FORBIDDEN_CONFIG_KEYS = new Set(['password', 'passwordEncrypted'])

@@ -192,7 +192,12 @@ export default function BuildDetail({ buildResultKey }: BuildDetailProps) {
         navigate({ page: 'build', buildResultKey: targetKey })
       }
     } else {
-      showMsg('error', t('build.queue_failed').replace('{planKey}', planKey))
+      showMsg(
+        'error',
+        result.errorMessage
+          ? `${t('build.queue_failed').replace('{planKey}', planKey)} (${result.errorMessage})`
+          : t('build.queue_failed').replace('{planKey}', planKey),
+      )
     }
     setActionsOpen(false)
     setCustomizeOpen(false)
